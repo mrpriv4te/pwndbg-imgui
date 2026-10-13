@@ -195,9 +195,57 @@ class Agent:
                 data = data[len(CLEAR_SEQ):]
             if data.startswith("\n"):
                 data = data[1:]
+            if not data.strip() and name in self.FALLBACKS and self.thread_stopped():
+                try:
+                    data = getattr(self, self.FALLBACKS[name])()
+                except Exception as e:
+                    data = f"\x1b[90m({e})\x1b[0m"
             self.send({"ev": "section", "name": name, "text": data})
 
         return write
+
+    # pwndbg prints nothing for these sections in common situations
+    # (a single thread, $pc not on a call, heap tracking disabled).
+    FALLBACKS = {"threads": "fallback_threads", "args": "fallback_args", "heap_tracker": "fallback_heap_tracker"}
+
+    def fallback_threads(self) -> str:
+        gdb = self.gdb
+        current = gdb.selected_thread()
+        lines = []
+        for t in sorted(gdb.selected_inferior().threads(), key=lambda t: t.num):
+            if not t.is_valid():
+                continue
+            marker = "\x1b[32m\u25ba\x1b[0m" if t == current else " "
+            if t.is_running():
+                status = "\x1b[92mrunning\x1b[0m"
+            elif t.is_exited():
+                status = "\x1b[90mexited\x1b[0m"
+            else:
+                status = "\x1b[33mstopped\x1b[0m"
+            where = ""
+            if t == current and t.is_stopped():
+                frame = gdb.selected_frame()
+                sym = self.op_state().get("sym") or frame.name() or ""
+                where = f" \x1b[31m{frame.pc():#x}\x1b[0m" + (f" <{sym}>" if sym else "")
+            name = t.name or ""
+            lines.append(f" {marker} {t.num:<3} \x1b[36m{name!r}\x1b[0m tid {t.ptid[1]} {status}{where}")
+        return "\n".join(lines)
+
+    def fallback_args(self) -> str:
+        out = ""
+        try:
+            frame = self.gdb.selected_frame()
+            if frame.function() is not None:
+                out = self.quiet("info args").rstrip()
+        except self.gdb.error:
+            pass
+        hint = "\x1b[90mpwndbg lists call arguments when $pc is on a call instruction.\x1b[0m"
+        return f"{out}\n\n{hint}" if out else hint
+
+    def fallback_heap_tracker(self) -> str:
+        return ("\x1b[90mHeap tracking is disabled.\n"
+                "Enable it with `track-heap enable` (button above) to detect use-after-free,\n"
+                "double free and other misuse of the glibc allocator.\x1b[0m")
 
     def start(self) -> None:
         gdb = self.gdb
@@ -604,6 +652,41 @@ class Agent:
         out.sort(key=lambda d: (d["scope"], d["name"]))
         return out
 
+    def op_decomp_status(self) -> dict:
+        try:
+            import pwndbg.dintegration as di
+        except Exception:
+            return {"available": False, "connected": False}
+        m = di.manager
+        cfg = self.pwndbg.config if self.pwndbg is not None else None
+        return {
+            "available": True,
+            "connected": m.is_connected(),
+            "name": m.decompiler_name() if m.is_connected() else None,
+            "host": str(getattr(cfg, "decompiler_host", "")) if cfg is not None else "",
+            "port": str(getattr(cfg, "decompiler_port", "")) if cfg is not None else "",
+        }
+
+    def op_decompile(self, addr: int | None = None) -> dict:
+        """Whole-function decompilation (highlighted, ► on the current line)."""
+        self.require_stopped()
+        import pwndbg.dintegration as di
+
+        m = di.manager
+        if not m.is_connected():
+            return {"connected": False, "lines": None}
+        if addr is None:
+            addr = self.gdb.selected_frame().pc()
+        lines = m.decompile_pretty(addr, 1 << 20)  # "all lines" (-1 is not honored)
+        sym = None
+        try:
+            import pwndbg.aglib.symbol
+
+            sym = pwndbg.aglib.symbol.resolve_addr(addr)
+        except Exception:
+            pass
+        return {"connected": True, "name": m.decompiler_name(), "addr": addr, "sym": sym, "lines": lines}
+
     def op_quit(self) -> None:
         try:
             if self.gdb.selected_inferior().pid:
@@ -636,6 +719,7 @@ class Settings:
         "fps_idle": 20.0,
         "viewports": True,
         "remember_bps": True,
+        "decomp_autoconnect": True,
         "autofit": True,
         "io_raw": True,
         "io_echo": True,
@@ -1223,13 +1307,17 @@ class Pty:
                 return
             if not data:
                 return
-            if self.keep_bytes:
-                with self.term.lock:
-                    self.raw_bytes += data
-                    if len(self.raw_bytes) > self.keep_bytes:
-                        del self.raw_bytes[: len(self.raw_bytes) - self.keep_bytes]
-                    self.bytes_version += 1
-            self.term.feed(self.decoder.decode(data))
+            try:
+                if self.keep_bytes:
+                    with self.term.lock:
+                        self.raw_bytes += data
+                        if len(self.raw_bytes) > self.keep_bytes:
+                            del self.raw_bytes[: len(self.raw_bytes) - self.keep_bytes]
+                        self.bytes_version += 1
+                self.term.feed(self.decoder.decode(data))
+            except Exception as e:  # keep draining the PTY whatever happens
+                sys.stderr.write(f"{APP_NAME}: terminal error: {e!r}\n")
+                self.term.pending = ""
 
     def write(self, data: bytes) -> None:
         while data:
@@ -1356,6 +1444,29 @@ def find_mono_fonts() -> list[tuple[str, str]]:
     return [(f, found[f]) for f in order]
 
 
+# Characters pwndbg (and gdb) print that many fonts lack.
+FALLBACK_CHARS = "►◂▸◆—─│┃╎├└↓↑→←⚠✔✘✗•●○▲▼…⋯⤷"
+
+
+def find_fallback_fonts(exclude: tuple[str, ...] = ()) -> list[str]:
+    """Fonts that provide the glyphs in FALLBACK_CHARS (DejaVu Sans Mono first)."""
+    import subprocess
+
+    def match(pattern: str) -> str:
+        try:
+            return subprocess.run(["fc-match", "-f", "%{file}", pattern],
+                                  capture_output=True, text=True, timeout=5).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+
+    files: list[str] = []
+    for pattern in ["DejaVu Sans Mono"] + [f":charset={ord(c):x}" for c in FALLBACK_CHARS]:
+        path = match(pattern)
+        if path and path.lower().endswith((".ttf", ".otf")) and path not in files and path not in exclude:
+            files.append(path)
+    return files
+
+
 def find_bold_variant(path: str) -> str | None:
     if "[wght]" in path or "Variable" in path:
         return None
@@ -1445,6 +1556,10 @@ class TextView:
         self.rows = 0
         self.cols = 0
         self.wrap_cols = 0
+        self.on_scroll_end = None  # called when the user scrolls past the bottom
+        self.keep_scroll_once = False
+        self.lockable = False  # show a lock toggle that freezes the scroll position
+        self.locked = False
 
     # -- selection helpers ----------------------------------------------
     def selection(self):
@@ -1589,10 +1704,11 @@ class TextView:
         with term.lock:
             lines = term.lines
             n = len(lines)
-            if n == 1 and not lines[0].chars and self.empty_hint:
+            hint = self.empty_hint() if callable(self.empty_hint) else self.empty_hint
+            if n == 1 and not lines[0].chars and hint:
                 imgui.set_cursor_pos(ImVec2(pad.x, pad.y))
                 imgui.push_style_color(imgui.Col_.text, v4(th.dim))
-                imgui.text_wrapped(self.empty_hint)
+                imgui.text_wrapped(hint)
                 imgui.pop_style_color()
                 return
             total_w = gw + (term.width + 2) * char_w
@@ -1616,6 +1732,9 @@ class TextView:
                 imgui.set_scroll_y(max(0.0, self.pending_scroll * line_h - win_h / 2))
                 self.pending_scroll = None
             self.at_bottom = scroll_y >= imgui.get_scroll_max_y() - line_h
+            if (self.on_scroll_end is not None and hovered and io.mouse_wheel < 0
+                    and scroll_y >= imgui.get_scroll_max_y() - 1):
+                self.on_scroll_end()
 
             first = max(0, int(scroll_y // line_h) - 1)
             last = min(n, int((scroll_y + win_h) // line_h) + 1)
@@ -1730,6 +1849,26 @@ class TextView:
             else:
                 self.hover = None
 
+            # scroll lock toggle, top-right corner of the visible area
+            on_button = False
+            if self.lockable:
+                icon = fa.ICON_FA_LOCK if self.locked else fa.ICON_FA_LOCK_OPEN
+                bw = imgui.calc_text_size(icon).x + style.frame_padding.x * 2
+                bar = style.scrollbar_size if imgui.get_scroll_max_y() > 0 else 0.0
+                imgui.set_cursor_pos(ImVec2(scroll_x + win_w - bw - bar - 6, scroll_y + 4))
+                imgui.push_style_color(imgui.Col_.button, v4(th.panel, 0.85 if self.locked else 0.35))
+                imgui.push_style_color(imgui.Col_.text, v4(th.accent if self.locked else th.dim))
+                if imgui.small_button(f"{icon}##lock{self.vid}"):
+                    self.locked = not self.locked
+                imgui.pop_style_color(2)
+                on_button = imgui.is_item_hovered()
+                if on_button:
+                    imgui.pop_font()
+                    imgui.set_tooltip("Scroll position locked" if self.locked else
+                                      "Lock the scroll position (don't jump on each stop)")
+                    imgui.push_font(app.mono, app.code_size)
+                hovered = hovered and not on_button
+
             # mouse interaction
             def cell(round_col: bool = True):
                 li = min(max(0, m_line), n - 1)
@@ -1803,6 +1942,11 @@ class TextView:
         imgui.push_font(app.mono, app.code_size)
 
     def _follow(self, lines, line_h: float, win_h: float) -> None:
+        if self.locked:
+            return
+        if self.keep_scroll_once:
+            self.keep_scroll_once = False
+            return
         if self.follow == "top":
             imgui.set_scroll_y(0)
         elif self.follow == "bottom":
@@ -1821,11 +1965,15 @@ class TextView:
         addr = ctx.get("addr")
         if addr is not None:
             imgui.text_colored(v4(app.theme.accent), f"{addr:#x}")
+            imgui.push_id("addr")
             app.address_menu_items(addr)
+            imgui.pop_id()
             imgui.separator()
         if self.menu is not None:
+            imgui.push_id("view")
             if self.menu(ctx):
                 imgui.separator()
+            imgui.pop_id()
         if imgui.menu_item_simple(fa.ICON_FA_COPY + "  Copy", "Ctrl+C", False, self.selection() is not None):
             self.copy()
         if imgui.menu_item_simple("     Copy line", "", False, ctx.get("line") is not None):
@@ -1942,6 +2090,161 @@ class CmdView:
         self.last_seen = time.monotonic()
         if (self.ran_gen == -1 or (self.stale and app.is_stopped())) and app.connected() and not self.busy:
             self.run()
+
+
+class DecompView:
+    """Whole-function decompilation from pwndbg's decompiler integration
+    (decomp2dbg: Ghidra, IDA, Binary Ninja, angr)."""
+
+    LABEL = "Decompiler"
+
+    def __init__(self, app) -> None:
+        self.app = app
+        self.term = Term(max_lines=20000)
+        self.view = TextView(app, self.term, "decomp", follow="pc", empty_hint=self.hint)
+        self.view.lockable = True
+        self.status: dict = {}
+        self.error = ""
+        self.follow_pc = True
+        self.target = ""  # expression decompiled when not following $pc
+        self.title = ""
+        self.last_seen = 0.0
+        self.stale = True
+        self.busy = False
+        self.auto_tried = False
+
+    def hint(self) -> str:
+        if self.error:
+            return self.error
+        if not self.status.get("available", True):
+            return "This pwndbg has no decompiler integration."
+        if not self.status.get("connected"):
+            return ("Not connected to a decompiler.\n\nOpen the binary in Ghidra / IDA / Binary Ninja / angr with the "
+                    "decomp2dbg plugin started (Ghidra: Ctrl+Shift+D), then press Connect.\n"
+                    "Install the plugin with `di install ghidra` (or ida, binja, angr).")
+        if not self.app.is_stopped():
+            return "Waiting for the program to stop…"
+        return "No decompilation for this address."
+
+    def refresh_status(self, then=None) -> None:
+        def done(st):
+            self.status = st
+            if then:
+                then()
+
+        if self.app.rpc:
+            self.app.rpc.request("decomp_status", done, None)
+
+    def refresh(self) -> None:
+        """Re-decompile now if visible, otherwise when it next is."""
+        if time.monotonic() - self.last_seen < 0.5:
+            self.fetch()
+        else:
+            self.stale = True
+
+    def fetch(self) -> None:
+        app = self.app
+        self.stale = False
+        if not app.rpc or not app.is_stopped() or self.busy:
+            return
+        if not self.status.get("connected"):
+            self.refresh_status(lambda: self.status.get("connected") and self.fetch())
+            return
+        self.busy = True
+
+        def done(res):
+            self.busy = False
+            self.error = ""
+            if not res.get("connected"):
+                self.status["connected"] = False
+                self.term.clear()
+                return
+            lines = res.get("lines")
+            if lines is None:
+                self.term.clear()
+                self.error = f"The decompiler returned nothing for {res['addr']:#x}."
+                return
+            self.title = res.get("sym") or f"{res['addr']:#x}"
+            self.term.set_text("\n".join(lines))
+            if not self.follow_pc:
+                self.view.pending_scroll = 0
+
+        def fail(err):
+            self.busy = False
+            self.term.clear()
+            self.error = f"Decompilation failed: {err}"
+            self.refresh_status()
+
+        if self.follow_pc or not self.target.strip():
+            app.rpc.request("decompile", done, fail)
+        else:
+            app.rpc.request("eval", lambda a: app.rpc.request("decompile", done, fail, addr=a),
+                            lambda e: fail(e), expr=self.target.strip())
+
+    def connect(self) -> None:
+        self.error = ""
+        self.app.exec("decompiler-integration connect", refresh=False,
+                      cb=lambda _o: self.refresh_status(self.fetch))
+
+    def gui(self) -> None:
+        app = self.app
+        th = app.theme
+        self.last_seen = time.monotonic()
+        st = self.status
+        connected = bool(st.get("connected"))
+        if not st and app.connected() and app.info.get("pwndbg"):
+            self.status = {"pending": True}
+            self.refresh_status()
+        # one automatic connection attempt per session, once the program stops
+        if (not connected and st.get("available") and not self.auto_tried and app.is_stopped()
+                and app.settings["decomp_autoconnect"]):
+            self.auto_tried = True
+            self.connect()
+
+        color = th.green if connected else th.dim
+        imgui.text_colored(v4(color), fa.ICON_FA_CIRCLE)
+        imgui.same_line()
+        if connected:
+            imgui.text_unformatted(f"{st.get('name')}")
+        else:
+            imgui.text_disabled(f"not connected ({st.get('host', '?')}:{st.get('port', '?')})")
+        imgui.same_line()
+        imgui.begin_disabled(not app.is_alive())
+        if not connected:
+            if imgui.button(f"{fa.ICON_FA_PLUG} Connect"):
+                self.connect()
+        else:
+            if imgui.button(f"{fa.ICON_FA_LINK_SLASH}##dd"):
+                app.exec("decompiler-integration disconnect", refresh=False,
+                         cb=lambda _o: self.refresh_status(self.term.clear))
+            imgui.set_item_tooltip("Disconnect")
+            imgui.same_line()
+            if imgui.button(f"{fa.ICON_FA_ARROWS_ROTATE}##ds"):
+                app.exec("decompiler-integration sync", cb=lambda _o: self.fetch())
+            imgui.set_item_tooltip("Sync symbols and variables from the decompiler")
+            imgui.same_line()
+            if imgui.button(f"{fa.ICON_FA_CROSSHAIRS}##dj"):
+                app.exec("decompiler-integration jump", refresh=False, quiet=True)
+            imgui.set_item_tooltip("Move the decompiler's cursor to $pc")
+        imgui.end_disabled()
+        imgui.same_line()
+        changed, self.follow_pc = imgui.checkbox("Follow PC", self.follow_pc)
+        if changed and self.follow_pc:
+            self.fetch()
+        imgui.same_line()
+        imgui.set_next_item_width(max(80.0, imgui.get_content_region_avail().x - imgui.calc_text_size("Go").x - 24))
+        entered, self.target = imgui.input_text_with_hint(
+            "##dtarget", "function / address to decompile (main, 0x401156)", self.target,
+            imgui.InputTextFlags_.enter_returns_true)
+        imgui.same_line()
+        if (imgui.button("Go##dgo") or entered) and self.target.strip():
+            self.follow_pc = False
+            self.fetch()
+        if self.title and self.term.lines and self.term.lines[0].chars:
+            imgui.text_disabled(f"{fa.ICON_FA_CODE}  {self.title}" + ("" if self.follow_pc else "   (not following $pc)"))
+        self.view.render()
+        if self.stale and app.is_stopped():
+            self.fetch()
 
 
 class MemoryView:
@@ -2243,7 +2546,9 @@ class MemoryView:
             q = self.read_int(a & ~7 if self.mode == "qwords" else a, 8)
             if q is not None and app.page_for(q) and imgui.menu_item_simple(f"Follow pointer {q:#x}"):
                 self.goto(q)
+            imgui.push_id("addr")
             app.address_menu_items(a)
+            imgui.pop_id()
             imgui.separator()
             row = a & ~(self.bpr - 1)
             row_bytes = [self.byte_at(row + i) for i in range(self.bpr)]
@@ -2413,12 +2718,15 @@ class App:
         self.layout_sent = None
         self.layout_pending = (None, 0.0)
         self.exiting = False
+        self.section_extra: dict[str, int] = {"stack": 0}
+        self.load_more_t = 0.0
+        self.gdb_idle = False  # True while gdb sits at its prompt
 
         self.sections: dict[str, dict] = {}
         for name in SECTIONS:
             label, icon, follow, _vis, _dock = SECTION_META[name]
             term = Term(max_lines=5000)
-            view = TextView(self, term, name, follow=follow, empty_hint=self._section_hint(name))
+            view = TextView(self, term, name, follow=follow, empty_hint=functools.partial(self._section_hint, name))
             self.sections[name] = {"term": term, "view": view, "label": f"{getattr(fa, 'ICON_FA_' + icon)} {label}"}
         self._setup_section_hooks()
         self.console_view = TextView(self, self.console_term, "console", follow="bottom")
@@ -2426,6 +2734,7 @@ class App:
                                 empty_hint="The debugged program's stdin/stdout live here once it runs.")
         self.io_hex_view = TextView(self, self.io_hex_term, "iohex", follow="bottom")
         self.memory = MemoryView(self)
+        self.decomp = DecompView(self)
         self.cmd_views: list[CmdView] = []
         self.views_to_add: list[CmdView] = []
 
@@ -2461,13 +2770,14 @@ class App:
         self.show_metrics = False
 
     # ── helpers ─────────────────────────────────────────────────────────
-    @staticmethod
-    def _section_hint(name: str) -> str:
+    def _section_hint(self, name: str) -> str:
         if name == "expressions":
             return "No watch expressions. Add one above (e.g. $rsp+8, *(long*)$rdi, or a command like `x/8gx $sp`)."
+        if not self.is_stopped():
+            return "Waiting for the program to stop…"
         if name == "code":
             return "No source available for the current location."
-        return "Waiting for the program to stop…"
+        return "Nothing to show here."
 
     def connected(self) -> bool:
         return self.rpc is not None and self.rpc.connected
@@ -2489,6 +2799,7 @@ class App:
         self.toast(err, "error", 5.0)
 
     def send_console(self, cmd: str) -> None:
+        self.gdb_idle = False
         self.console.write((cmd + "\n").encode())
 
     def exec(self, cmd: str, refresh: bool = True, cb=None, quiet: bool = False) -> None:
@@ -2625,6 +2936,9 @@ class App:
         thr = self.sections["threads"]["view"]
         thr.on_dblclick = lambda i, t: self._select_thread(t)
         self.sections["regs"]["view"].menu = self._regs_menu
+        self.sections["stack"]["view"].on_scroll_end = lambda: self.load_more("stack")
+        for name in ("regs", "stack", "backtrace", "args", "expressions", "threads", "heap_tracker", "last_signal"):
+            self.sections[name]["view"].lockable = True
         self.sections["expressions"]["view"].menu = self._watch_menu
 
     def _disasm_addr(self, text: str):
@@ -2648,7 +2962,7 @@ class App:
         if a is None:
             return False
         imgui.text_disabled(f"instruction {a:#x}")
-        if imgui.menu_item_simple(fa.ICON_FA_CIRCLE_DOT + "  Toggle breakpoint"):
+        if ctx.get("addr") != a and imgui.menu_item_simple(fa.ICON_FA_CIRCLE_DOT + "  Toggle breakpoint"):
             self.rpc.request("bp_toggle", None, self.error_toast, addr=a)
         running = not self.is_stopped()
         if imgui.menu_item_simple(fa.ICON_FA_FORWARD + "  Run to here", "", False, not running):
@@ -2771,6 +3085,7 @@ class App:
             sec["term"].set_text(msg.get("text", ""))
 
     def on_state(self, msg) -> None:
+        self.gdb_idle = True  # sent right before gdb shows its prompt
         was_alive = self.is_alive()
         self.state = msg.get("state", {})
         if self.is_alive() and not was_alive:
@@ -2780,12 +3095,19 @@ class App:
             self.addr_cache.clear()
             self.rpc.request("vmmap", self._set_vmmap)
             self.memory.on_stop()
+            if self.decomp.follow_pc:
+                self.decomp.refresh()
             for v in self.cmd_views:
                 if v.auto and v.ran_gen != -1:
                     v.refresh()
 
     def on_stop(self, msg) -> None:
         self.dirty_gen += 1
+        for name in self.section_extra:
+            view = self.sections[name]["view"]
+            if not view.locked:  # a locked view keeps the extra lines it loaded
+                self.section_extra[name] = 0
+                view.keep_scroll_once = False
         self.state["running"] = False
         reason = msg.get("reason")
         if reason == "breakpoint":
@@ -2885,6 +3207,17 @@ class App:
             out.append({"kind": kind, "where": where, "enabled": b["enabled"], "cond": b.get("cond")})
         self.settings.binary(self.cfg.binary)["bps"] = out
 
+    def load_more(self, name: str) -> None:
+        """Scrolling past the end of the stack asks pwndbg for more lines."""
+        now = time.monotonic()
+        if not self.is_stopped() or now - self.load_more_t < 0.4:
+            return
+        self.load_more_t = now
+        view = self.sections[name]["view"]
+        self.section_extra[name] += max(8, view.rows)
+        view.keep_scroll_once = True
+        self.layout_pending = (None, 0.0)
+
     # ── layout sync with pwndbg ─────────────────────────────────────────
     def sync_layout(self) -> None:
         if not self.connected() or not self.info.get("pwndbg"):
@@ -2900,6 +3233,8 @@ class App:
             view = sec["view"]
             w = view.cols if view.cols > 10 else 0
             h = view.rows if (self.settings["autofit"] and name in AUTOFIT_HEIGHT and view.rows > 2) else 0
+            if self.section_extra.get(name):
+                h = max(h, view.rows) + self.section_extra[name]
             geom[name] = [w, h]
         key = json.dumps([enabled, geom])
         if key == self.layout_sent:
@@ -2908,7 +3243,7 @@ class App:
         if self.layout_pending[0] != key:
             self.layout_pending = (key, now)
             return
-        if now - self.layout_pending[1] < 0.2:
+        if now - self.layout_pending[1] < 0.2 and not any(self.section_extra.values()):
             return
         self.layout_sent = key
         self.rpc.request("layout", None, self.error_toast, enabled=enabled, geom=geom)
@@ -2922,12 +3257,22 @@ class App:
         fonts_dir = os.path.join(assets, "fonts")
         fa_path = os.path.join(fonts_dir, "Font_Awesome_6_Free-Solid-900.otf")
 
+        fallbacks: list[str] | None = None
+
         def load(path: str, merge_icons: bool):
+            nonlocal fallbacks
             font = hello_imgui.load_font(path, 16.0, hello_imgui.FontLoadingParams(inside_assets=False))
             if merge_icons and os.path.exists(fa_path):
                 params = hello_imgui.FontLoadingParams(merge_to_last_font=True, inside_assets=False)
                 params.font_config.glyph_offset = ImVec2(0, 1)
                 hello_imgui.load_font(fa_path, 14.0, params)
+            # glyphs missing from `path` (►, ◂, ─, ⚠, …) come from these, in order
+            if fallbacks is None:
+                fallbacks = find_fallback_fonts()
+            for fb in fallbacks:
+                if os.path.realpath(fb) != os.path.realpath(path):
+                    params = hello_imgui.FontLoadingParams(merge_to_last_font=True, inside_assets=False)
+                    hello_imgui.load_font(fb, 16.0, params)
             return font
 
         ui_path = os.path.join(fonts_dir, "Roboto", "Roboto-Regular.ttf")
@@ -2942,6 +3287,7 @@ class App:
         self.mono = load(mono_path, True)
         bold = find_bold_variant(mono_path)
         self.mono_bold = load(bold, False) if bold else None
+        # merged fallbacks + icons make lookups slower only for missing glyphs
 
     def setup_style(self) -> None:
         self.apply_theme(self.theme)
@@ -3314,14 +3660,15 @@ class App:
         text, color = self.state_text()
         w = imgui.calc_text_size(text).x + 24
         imgui.same_line(max(imgui.get_cursor_pos_x(), imgui.get_window_width() - w - 12))
-        imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 4)
         dl = imgui.get_window_draw_list()
-        p = imgui.get_cursor_screen_pos()
+        x = imgui.get_cursor_screen_pos().x
         h = imgui.get_text_line_height()
-        dl.add_rect_filled(ImVec2(p.x - 6, p.y - 3), ImVec2(p.x + w - 6, p.y + h + 3), u32(color, 0.16), h)
-        dl.add_circle_filled(ImVec2(p.x + 5, p.y + h / 2), 4.0, u32(color))
-        imgui.set_cursor_screen_pos(ImVec2(p.x + 14, p.y))
-        imgui.text_colored(v4(color), text)
+        cy = imgui.get_window_pos().y + imgui.get_window_height() / 2  # center of the toolbar
+        pill_h = h + 8
+        dl.add_rect_filled(ImVec2(x, cy - pill_h / 2), ImVec2(x + w, cy + pill_h / 2), u32(color, 0.16), pill_h / 2)
+        dl.add_circle_filled(ImVec2(x + 11, cy), 4.0, u32(color))
+        dl.add_text(ImVec2(x + 20, cy - h / 2), u32(color), text)
+        imgui.dummy(ImVec2(w, 1))
         imgui.pop_style_var(2)
 
     def state_text(self):
@@ -3382,6 +3729,17 @@ class App:
                 imgui.text_colored(v4(self.theme.yellow), "pwndbg is not loaded in gdb (see --pwndbg).")
             if name == "expressions":
                 self._watch_bar()
+            elif name == "heap_tracker":
+                imgui.begin_disabled(not self.is_stopped())
+                if imgui.button("Enable##ht"):
+                    self.exec("track-heap enable")
+                imgui.same_line()
+                if imgui.button("Disable##ht"):
+                    self.exec("track-heap disable")
+                imgui.same_line()
+                if imgui.button("Toggle stop on error##ht"):
+                    self.exec("track-heap toggle-break")
+                imgui.end_disabled()
             sec["view"].render()
 
         return gui
@@ -3427,7 +3785,12 @@ class App:
             self.focus_console = False
         flags = (imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.callback_history
                  | imgui.InputTextFlags_.callback_completion | imgui.InputTextFlags_.callback_always)
-        hint = "program running — F6 / Ctrl+C to interrupt" if running else "gdb / pwndbg command  (Tab: complete, ↑↓: history)"
+        if running:
+            hint = "program running — commands are queued until it stops (F6 / Ctrl+C interrupts)"
+        elif not self.gdb_idle and self.connected():
+            hint = "gdb is busy — commands are queued"
+        else:
+            hint = "gdb / pwndbg command  (Tab: complete, ↑↓: history)"
         imgui.push_font(self.mono, self.code_size)
         entered, self.console_input = imgui.input_text_with_hint("##console_in", hint, self.console_input, flags, self._console_cb)
         imgui.pop_font()
@@ -3447,6 +3810,10 @@ class App:
                 self.history.append(cmd)
             self.history_pos = -1
             self.completions = []
+            if running:
+                self.toast(f"{fa.ICON_FA_PERSON_RUNNING}  Program running: '{cmd}' runs when it stops (F6 to interrupt)", "warn", 4.0)
+            elif not self.gdb_idle and self.connected():
+                self.toast(f"{fa.ICON_FA_HOURGLASS_HALF}  gdb is busy: '{cmd}' is queued", "warn", 3.0)
             self.send_console(cmd)
             self.console_input = ""
             self.console_view.at_bottom = True
@@ -3953,6 +4320,8 @@ class App:
         _, st["autofit"] = imgui.checkbox("Fit context sections to their window", st["autofit"])
         help_marker("Disassembly, stack, source, backtrace and threads show exactly as many lines as fit.")
         _, st["remember_bps"] = imgui.checkbox("Remember breakpoints per binary", st["remember_bps"])
+        _, st["decomp_autoconnect"] = imgui.checkbox("Connect to the decompiler automatically", st["decomp_autoconnect"])
+        help_marker("When the Decompiler window is open, try `decompiler-integration connect` once the program stops.")
         changed, st["viewports"] = imgui.checkbox("Allow floating OS windows (viewports)", st["viewports"])
         if changed:
             self.toast("Applies on next start", "info")
@@ -3972,6 +4341,7 @@ class App:
             (f"{fa.ICON_FA_TERMINAL} Console", self.console_gui, "Bottom", True),
             (f"{fa.ICON_FA_KEYBOARD} Program I/O", self.io_gui, "Bottom", True),
             (f"{fa.ICON_FA_MEMORY} Memory", self.memory_gui, "MainDockSpace", True),
+            (f"{fa.ICON_FA_DRAGON} {DecompView.LABEL}", self.decomp.gui, "MainDockSpace", True),
             (f"{fa.ICON_FA_MAP} VMMap", self.vmmap_gui, "RightBottom", True),
             (f"{fa.ICON_FA_CIRCLE_DOT} Breakpoints", self.breakpoints_gui, "RightBottom", True),
             (f"{fa.ICON_FA_BOOK} Commands", self.commands_gui, "MainDockSpace", False),
@@ -4298,7 +4668,7 @@ class App:
             dw = hello_imgui.DockableWindow(label, dock, fn)
             dw.is_visible = visible
             self.default_visible[label] = visible
-            if label.endswith(" Memory"):
+            if label.endswith((" Memory", DecompView.LABEL)):
                 windows.insert(2, dw)
             else:
                 windows.append(dw)
