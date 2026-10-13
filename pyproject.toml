@@ -1,0 +1,27 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "pwndbg-imgui"
+dynamic = ["version"]
+description = "A dockable Dear ImGui front-end for pwndbg"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["imgui-bundle>=1.92"]
+keywords = ["pwndbg", "gdb", "debugger", "imgui", "reverse-engineering", "exploitation"]
+classifiers = [
+    "Environment :: X11 Applications",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Topic :: Software Development :: Debuggers",
+]
+
+[project.scripts]
+pwndbg-imgui = "pwndbg_imgui.cli:main"
+
+[tool.hatch.version]
+path = "src/pwndbg_imgui/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/pwndbg_imgui"]

@@ -1,0 +1,682 @@
+"""gdb-side agent: runs inside gdb's embedded Python (standard library only).
+
+It is loaded by gdb from its file path (not imported from the pipx environment, whose
+packages must not leak into pwndbg's), loads pwndbg if needed, redirects every context
+section to the GUI and answers JSON requests over a socketpair inherited from the GUI.
+"""
+
+from __future__ import annotations
+
+import functools
+import json
+import os
+import re
+import socket
+import sys
+import threading
+
+APP_NAME = "pwndbg-imgui"
+
+ENV_FD = "PWNDBG_IMGUI_FD"
+
+
+ENV_TTY = "PWNDBG_IMGUI_TTY"
+
+
+ENV_INIT = "PWNDBG_IMGUI_INIT"
+
+
+SECTIONS = (
+    "regs",
+    "disasm",
+    "code",
+    "stack",
+    "backtrace",
+    "args",
+    "expressions",
+    "threads",
+    "heap_tracker",
+    "last_signal",
+)
+
+
+SECTION_LINES_PARAM = {
+    "code": "context-code-lines",
+    "backtrace": "context-backtrace-lines",
+}
+
+
+CLEAR_SEQ = "\x1b[H\x1b[2J"
+
+
+PWNDBG_CANDIDATE_PATHS = (
+    "~/.local/share/pwndbg/gdbinit.py",
+    "~/pwndbg/gdbinit.py",
+    "~/tools/pwndbg/gdbinit.py",
+    "/usr/share/pwndbg/gdbinit.py",
+    "/opt/pwndbg/gdbinit.py",
+)
+
+
+class Agent:
+    def __init__(self) -> None:
+        import gdb
+
+        self.gdb = gdb
+        fd = int(os.environ.pop(ENV_FD))
+        os.set_inheritable(fd, False)  # never leak the socket to the inferior
+        self.sock = socket.socket(fileno=fd)
+        self.wlock = threading.Lock()
+        self.writers: dict[str, object] = {}
+        self.geom: dict[str, tuple] = {}
+        self.enabled: list[str] = []
+        self.ctx = None  # pwndbg.commands.context once pwndbg is loaded
+        self.pwndbg = None
+        self.mask = (1 << 64) - 1
+
+    # -- transport ----------------------------------------------------------
+    def send(self, obj: dict) -> None:
+        data = (json.dumps(obj, separators=(",", ":"), default=str) + "\n").encode()
+        with self.wlock:
+            try:
+                self.sock.sendall(data)
+            except OSError:
+                pass
+
+    def reader_loop(self) -> None:
+        buf = b""
+        while True:
+            try:
+                chunk = self.sock.recv(1 << 16)
+            except OSError:
+                break
+            if not chunk:
+                break
+            buf += chunk
+            while b"\n" in buf:
+                line, buf = buf.split(b"\n", 1)
+                try:
+                    req = json.loads(line)
+                except ValueError:
+                    continue
+                self.gdb.post_event(functools.partial(self.handle, req))
+
+    def handle(self, req: dict) -> None:
+        rid = req.get("id")
+        op = req.get("op", "")
+        fn = getattr(self, "op_" + op, None)
+        try:
+            if fn is None:
+                raise ValueError(f"unknown op {op!r}")
+            res = fn(**req.get("args", {}))
+            out = {"id": rid, "ok": True, "res": res}
+        except Exception as e:  # report every failure to the GUI
+            out = {"id": rid, "ok": False, "err": str(e).strip() or type(e).__name__}
+        if rid is not None:
+            self.send(out)
+
+    # -- setup --------------------------------------------------------------
+    def quiet(self, cmd: str) -> str:
+        try:
+            return self.gdb.execute(cmd, to_string=True) or ""
+        except self.gdb.error:
+            return ""
+
+    def pwndbg_loaded(self) -> bool:
+        return "pwndbg" in sys.modules and "pwndbg.commands" in sys.modules
+
+    def load_pwndbg(self, spec: str) -> None:
+        if self.pwndbg_loaded() or spec == "none":
+            return
+        gdb = self.gdb
+        candidates: list[tuple[str, str]] = []
+        if spec.startswith("source:"):
+            candidates.append(("source", spec[len("source:"):]))
+        elif spec.startswith("cmd:"):
+            candidates.append(("cmd", spec[len("cmd:"):]))
+        else:
+            if re.search(r"^init-pwndbg\b", self.quiet("help user-defined"), re.M):
+                candidates.append(("cmd", "init-pwndbg"))
+            env_path = os.environ.get("PWNDBG_PATH")
+            if env_path:
+                candidates.append(("source", os.path.join(env_path, "gdbinit.py")))
+            for path in PWNDBG_CANDIDATE_PATHS:
+                path = os.path.expanduser(path)
+                if os.path.exists(path):
+                    candidates.append(("source", path))
+
+        # gdb only sets __file__ for the outermost sourced script; pwndbg's
+        # gdbinit.py relies on it, so hide any outer one while sourcing it.
+        # pwndbg's argparse `prog` handling also expects gdb's empty sys.argv[0].
+        import __main__
+
+        saved = __main__.__dict__.pop("__file__", None)
+        saved_argv0 = sys.argv[0] if sys.argv else None
+        if sys.argv:
+            sys.argv[0] = ""
+        try:
+            for kind, value in candidates:
+                try:
+                    gdb.execute(value if kind == "cmd" else f"source {value}")
+                except gdb.error as e:
+                    print(f"[{APP_NAME}] loading pwndbg with {value!r} failed: {e}")
+                if self.pwndbg_loaded():
+                    break
+        finally:
+            if saved is not None:
+                __main__.__file__ = saved
+            if saved_argv0 is not None:
+                sys.argv[0] = saved_argv0
+
+    def make_writer(self, name: str):
+        def write(data: str) -> None:
+            if data == CLEAR_SEQ:
+                return
+            if data.startswith(CLEAR_SEQ):
+                data = data[len(CLEAR_SEQ):]
+            if data.startswith("\n"):
+                data = data[1:]
+            if not data.strip() and name in self.FALLBACKS and self.thread_stopped():
+                try:
+                    data = getattr(self, self.FALLBACKS[name])()
+                except Exception as e:
+                    data = f"\x1b[90m({e})\x1b[0m"
+            self.send({"ev": "section", "name": name, "text": data})
+
+        return write
+
+    # pwndbg prints nothing for these sections in common situations
+    # (a single thread, $pc not on a call, heap tracking disabled).
+    FALLBACKS = {"threads": "fallback_threads", "args": "fallback_args", "heap_tracker": "fallback_heap_tracker"}
+
+    def fallback_threads(self) -> str:
+        gdb = self.gdb
+        current = gdb.selected_thread()
+        lines = []
+        for t in sorted(gdb.selected_inferior().threads(), key=lambda t: t.num):
+            if not t.is_valid():
+                continue
+            marker = "\x1b[32m\u25ba\x1b[0m" if t == current else " "
+            if t.is_running():
+                status = "\x1b[92mrunning\x1b[0m"
+            elif t.is_exited():
+                status = "\x1b[90mexited\x1b[0m"
+            else:
+                status = "\x1b[33mstopped\x1b[0m"
+            where = ""
+            if t == current and t.is_stopped():
+                frame = gdb.selected_frame()
+                sym = self.op_state().get("sym") or frame.name() or ""
+                where = f" \x1b[31m{frame.pc():#x}\x1b[0m" + (f" <{sym}>" if sym else "")
+            name = t.name or ""
+            lines.append(f" {marker} {t.num:<3} \x1b[36m{name!r}\x1b[0m tid {t.ptid[1]} {status}{where}")
+        return "\n".join(lines)
+
+    def fallback_args(self) -> str:
+        out = ""
+        try:
+            frame = self.gdb.selected_frame()
+            if frame.function() is not None:
+                out = self.quiet("info args").rstrip()
+        except self.gdb.error:
+            pass
+        hint = "\x1b[90mpwndbg lists call arguments when $pc is on a call instruction.\x1b[0m"
+        return f"{out}\n\n{hint}" if out else hint
+
+    def fallback_heap_tracker(self) -> str:
+        return ("\x1b[90mHeap tracking is disabled.\n"
+                "Enable it with `track-heap enable` (button above) to detect use-after-free,\n"
+                "double free and other misuse of the glibc allocator.\x1b[0m")
+
+    def start(self) -> None:
+        gdb = self.gdb
+        tty = os.environ.pop(ENV_TTY, "")
+        spec = os.environ.pop(ENV_INIT, "auto")
+        for var in (ENV_FD, ENV_TTY, ENV_INIT):
+            self.quiet(f"unset environment {var}")
+
+        self.load_pwndbg(spec)
+        for cmd in (
+            "set editing off",
+            "set pagination off",
+            "set confirm off",
+            "set height 0",
+            "set width 0",
+        ):
+            self.quiet(cmd)
+        if tty:
+            self.quiet(f"set inferior-tty {tty}")
+
+        if self.pwndbg_loaded():
+            import pwndbg
+            import pwndbg.commands.context as ctx
+
+            self.pwndbg = pwndbg
+            self.ctx = ctx
+            for name in SECTIONS + ("legend",):
+                self.writers[name] = self.make_writer(name)
+                ctx.contextoutput(name, self.writers[name], True, "none", None, None)
+            # Nothing is computed until the GUI says which sections are shown.
+            ctx.config_context_sections.value = "regs disasm code stack backtrace"
+            # The prompt lives in its own pane: no need to reserve terminal lines.
+            self.quiet("set context-reserve-lines never")
+
+        ev = gdb.events
+        ev.stop.connect(self.on_stop)
+        ev.cont.connect(lambda e: self.send({"ev": "cont"}))
+        ev.exited.connect(self.on_exited)
+        ev.new_objfile.connect(lambda e: self.send({"ev": "objfile"}))
+        ev.breakpoint_created.connect(lambda b: self.send_breakpoints())
+        ev.breakpoint_modified.connect(lambda b: self.send_breakpoints())
+        # fired *before* gdb drops the breakpoint: leave it out explicitly
+        ev.breakpoint_deleted.connect(lambda b: self.send_breakpoints(exclude=b.number))
+        ev.memory_changed.connect(lambda e: self.send({"ev": "memory"}))
+        ev.register_changed.connect(lambda e: self.send({"ev": "memory"}))
+        ev.before_prompt.connect(self.on_prompt)
+
+        threading.Thread(target=self.reader_loop, name="imgui-agent", daemon=True).start()
+        self.send({"ev": "hello", "info": self.op_info()})
+        self.send_breakpoints()
+
+    # -- events -------------------------------------------------------------
+    def on_stop(self, event) -> None:
+        gdb = self.gdb
+        msg: dict = {"ev": "stop", "reason": "stop"}
+        if isinstance(event, gdb.BreakpointEvent):
+            msg["reason"] = "breakpoint"
+            msg["bps"] = [b.number for b in event.breakpoints]
+        elif isinstance(event, gdb.SignalEvent):
+            msg["reason"] = "signal"
+            msg["signal"] = event.stop_signal
+        self.send(msg)
+
+    def on_exited(self, event) -> None:
+        code = getattr(event, "exit_code", None)
+        self.send({"ev": "exited", "code": code})
+
+    def on_prompt(self) -> None:
+        self.send({"ev": "state", "state": self.op_state()})
+
+    def send_breakpoints(self, exclude: int | None = None) -> None:
+        try:
+            bps = [b for b in self.op_breakpoints() if b["num"] != exclude]
+            self.send({"ev": "bps", "bps": bps})
+        except Exception:
+            pass
+
+    # -- helpers ------------------------------------------------------------
+    def thread_stopped(self) -> bool:
+        thr = self.gdb.selected_thread()
+        return thr is not None and not thr.is_running()
+
+    def require_stopped(self) -> None:
+        if not self.thread_stopped():
+            raise RuntimeError("the program is not stopped")
+
+    def refresh_context(self) -> None:
+        if self.ctx is not None and self.thread_stopped() and self.enabled:
+            self.quiet("context")
+
+    def page_of(self, addr: int):
+        try:
+            import pwndbg.aglib.vmmap as vmmap
+
+            return vmmap.find(addr)
+        except Exception:
+            return None
+
+    @staticmethod
+    def page_kind(page) -> str:
+        if page.is_stack:
+            return "stack"
+        if page.is_heap:
+            return "heap"
+        if page.execute and page.write:
+            return "wx"
+        if page.execute:
+            return "code"
+        if page.write:
+            return "data"
+        if page.read:
+            return "rodata"
+        return "guard"
+
+    def page_dict(self, page) -> list:
+        return [page.start, page.end, page.permstr, page.offset, page.objfile, self.page_kind(page)]
+
+    # -- ops ----------------------------------------------------------------
+    def op_ping(self) -> str:
+        return "pong"
+
+    def op_info(self) -> dict:
+        gdb = self.gdb
+        info = {
+            "gdb": gdb.VERSION,
+            "pwndbg": None,
+            "file": gdb.current_progspace().filename,
+            "sections": list(SECTIONS),
+        }
+        if self.pwndbg is not None:
+            info["pwndbg"] = getattr(self.pwndbg, "__version__", "loaded")
+        return info
+
+    def op_state(self) -> dict:
+        gdb = self.gdb
+        st: dict = {"alive": False, "running": False, "pid": 0}
+        try:
+            st["file"] = gdb.current_progspace().filename
+            inf = gdb.selected_inferior()
+            st["pid"] = inf.pid
+            thr = gdb.selected_thread()
+            if thr is not None and thr.is_valid():
+                st["alive"] = True
+                st["tid"] = thr.num
+                st["running"] = thr.is_running()
+                if not st["running"]:
+                    frame = gdb.selected_frame()
+                    st["pc"] = frame.pc()
+                    st["func"] = frame.name()
+                    st["level"] = frame.level()
+                    st["arch"] = frame.architecture().name()
+                    sal = frame.find_sal()
+                    if sal.symtab is not None:
+                        st["src"] = sal.symtab.fullname()
+                        st["line"] = sal.line
+                    try:
+                        import pwndbg.aglib.symbol
+
+                        st["sym"] = pwndbg.aglib.symbol.resolve_addr(st["pc"])
+                    except Exception:
+                        st["sym"] = st["func"]
+        except gdb.error:
+            pass
+        return st
+
+    def op_exec(self, cmd: str, refresh: bool = False) -> str:
+        out = self.gdb.execute(cmd, to_string=True) or ""
+        if refresh:
+            self.refresh_context()
+            # No prompt is displayed for our requests: publish the new state
+            # ourselves (selected frame, registers, memory may have changed).
+            self.send({"ev": "memory"})
+            self.send({"ev": "state", "state": self.op_state()})
+        return out
+
+    def op_complete(self, text: str) -> list:
+        out = self.gdb.execute("complete " + text, to_string=True) or ""
+        return [line for line in out.splitlines() if line.strip()]
+
+    def op_layout(self, enabled: list, geom: dict) -> None:
+        ctx = self.ctx
+        if ctx is None:
+            return
+        changed = set(enabled) - set(self.enabled)
+        for name, (w, h) in geom.items():
+            if name not in self.writers:
+                continue
+            if self.geom.get(name) != (w, h):
+                changed.add(name)
+            self.geom[name] = (w, h)
+            ctx.contextoutput(name, self.writers[name], True, "none", w or None, h or None)
+            param = SECTION_LINES_PARAM.get(name)
+            if param and h:
+                self.quiet(f"set {param} {max(1, h - 1)}")
+        self.enabled = [s for s in SECTIONS if s in enabled]
+        ctx.config_context_sections.value = " ".join(self.enabled)
+        changed &= set(self.enabled)
+        if changed and self.thread_stopped():
+            self.quiet("context " + " ".join(sorted(changed)))
+
+    def op_context(self) -> None:
+        self.refresh_context()
+
+    def op_read(self, addr: int, size: int) -> dict:
+        self.require_stopped()
+        inf = self.gdb.selected_inferior()
+        addr &= self.mask
+        try:
+            return {"hex": bytes(inf.read_memory(addr, size)).hex(), "bad": []}
+        except self.gdb.MemoryError:
+            pass
+        out = bytearray(size)
+        bad = []
+        off = 0
+        while off < size:
+            n = min(size - off, 0x1000 - ((addr + off) & 0xFFF))
+            try:
+                out[off:off + n] = bytes(inf.read_memory(addr + off, n))
+            except self.gdb.MemoryError:
+                if bad and bad[-1][1] == off:
+                    bad[-1][1] = off + n
+                else:
+                    bad.append([off, off + n])
+            off += n
+        return {"hex": out.hex(), "bad": bad}
+
+    def op_write(self, addr: int, hex: str) -> None:
+        self.require_stopped()
+        self.gdb.selected_inferior().write_memory(addr & self.mask, bytes.fromhex(hex))
+        self.refresh_context()
+
+    def op_eval(self, expr: str) -> int:
+        gdb = self.gdb
+        val = gdb.parse_and_eval(expr)
+        code = val.type.strip_typedefs().code
+        if code in (gdb.TYPE_CODE_FUNC, gdb.TYPE_CODE_ARRAY) and val.address is not None:
+            val = val.address
+        try:
+            return int(val) & self.mask
+        except gdb.error:
+            return int(val.cast(gdb.lookup_type("long"))) & self.mask
+
+    def op_vmmap(self) -> list:
+        self.require_stopped()
+        import pwndbg.aglib.vmmap as vmmap
+
+        return [self.page_dict(p) for p in vmmap.get()]
+
+    def op_addrinfo(self, addrs: list) -> dict:
+        self.require_stopped()
+        import pwndbg.aglib.symbol
+        import pwndbg.chain
+
+        out = {}
+        for a in addrs[:64]:
+            info: dict = {}
+            page = self.page_of(a)
+            if page is not None:
+                info["page"] = self.page_dict(page)
+                try:
+                    info["chain"] = pwndbg.chain.format(a)
+                except Exception:
+                    pass
+            try:
+                info["sym"] = pwndbg.aglib.symbol.resolve_addr(a)
+            except Exception:
+                pass
+            out[str(a)] = info
+        return out
+
+    def op_breakpoints(self) -> list:
+        gdb = self.gdb
+        kinds = {}
+        for const, name in (("BP_BREAKPOINT", "break"), ("BP_HARDWARE_BREAKPOINT", "hbreak"),
+                            ("BP_WATCHPOINT", "watch"), ("BP_HARDWARE_WATCHPOINT", "watch"),
+                            ("BP_READ_WATCHPOINT", "rwatch"), ("BP_ACCESS_WATCHPOINT", "awatch"),
+                            ("BP_CATCHPOINT", "catch")):
+            if hasattr(gdb, const):
+                kinds[getattr(gdb, const)] = name
+        out = []
+        for b in gdb.breakpoints():
+            if not b.is_valid() or b.number < 0:
+                continue
+            locs = []
+            for loc in getattr(b, "locations", []) or []:
+                try:
+                    src = loc.source
+                    locs.append(
+                        {
+                            "addr": loc.address,
+                            "enabled": loc.enabled,
+                            "file": src[0] if src else None,
+                            "full": loc.fullname,
+                            "line": src[1] if src else None,
+                        }
+                    )
+                except Exception:
+                    pass
+            out.append(
+                {
+                    "num": b.number,
+                    "type": kinds.get(b.type, str(b.type)),
+                    "enabled": b.enabled,
+                    "temp": b.temporary,
+                    "location": b.location,
+                    "expr": b.expression,
+                    "cond": b.condition,
+                    "hits": b.hit_count,
+                    "ignore": b.ignore_count,
+                    "pending": b.pending,
+                    "locs": locs,
+                }
+            )
+        return out
+
+    def find_bps(self, addr=None, file=None, line=None) -> list:
+        res = []
+        for b in self.gdb.breakpoints():
+            if b.type != self.gdb.BP_BREAKPOINT:
+                continue
+            for loc in getattr(b, "locations", []) or []:
+                if addr is not None and loc.address == addr:
+                    res.append(b)
+                    break
+                src = loc.source
+                if file and src and src[1] == line and os.path.basename(src[0]) == os.path.basename(file):
+                    res.append(b)
+                    break
+        return res
+
+    def op_bp_toggle(self, addr: int | None = None, file: str | None = None, line: int | None = None) -> str:
+        bps = self.find_bps(addr, file, line)
+        if bps:
+            for b in bps:
+                b.delete()
+            return "deleted"
+        spec = f"*{addr:#x}" if addr is not None else f"{file}:{line}"
+        self.gdb.Breakpoint(spec)
+        return "created"
+
+    def op_bp_delete(self, num: int) -> None:
+        for b in self.gdb.breakpoints():
+            if b.number == num:
+                b.delete()
+
+    def op_bp_update(self, num: int, enabled: bool | None = None, cond: str | None = None) -> None:
+        for b in self.gdb.breakpoints():
+            if b.number == num:
+                if enabled is not None:
+                    b.enabled = enabled
+                if cond is not None:
+                    b.condition = cond or None
+
+    def op_commands(self) -> list:
+        if self.pwndbg is None:
+            return []
+        import pwndbg.commands
+
+        out = []
+        for c in pwndbg.commands.commands:
+            try:
+                help_text = c.parser.format_help()
+            except Exception:
+                help_text = getattr(c, "description", "") or ""
+            out.append(
+                {
+                    "name": c.command_name,
+                    "aliases": list(c.aliases),
+                    "cat": c.category.value,
+                    "desc": (c.parser.description or "").strip().split("\n")[0],
+                    "help": help_text,
+                }
+            )
+        return out
+
+    def op_config(self) -> list:
+        if self.pwndbg is None:
+            return []
+        import pwndbg.lib.config as cfg
+
+        kinds = {
+            cfg.PARAM_BOOLEAN: "bool",
+            cfg.PARAM_AUTO_BOOLEAN: "auto",
+            cfg.PARAM_ENUM: "enum",
+            cfg.PARAM_STRING: "str",
+            cfg.PARAM_OPTIONAL_FILENAME: "str",
+        }
+        out = []
+        for p in self.pwndbg.config.params.values():
+            kind = kinds.get(p.param_class, "int")
+            value = p.value
+            if kind == "auto":
+                value = "auto" if value is None else ("on" if value else "off")
+            out.append(
+                {
+                    "name": p.name,
+                    "kind": kind,
+                    "value": value if isinstance(value, (bool, int, str)) else str(value),
+                    "default": p.pretty_default(),
+                    "doc": p.set_show_doc,
+                    "help": p.help_docstring,
+                    "enum": list(p.enum_sequence or []),
+                    "scope": p.scope.name,
+                }
+            )
+        out.sort(key=lambda d: (d["scope"], d["name"]))
+        return out
+
+    def op_decomp_status(self) -> dict:
+        try:
+            import pwndbg.dintegration as di
+        except Exception:
+            return {"available": False, "connected": False}
+        m = di.manager
+        cfg = self.pwndbg.config if self.pwndbg is not None else None
+        return {
+            "available": True,
+            "connected": m.is_connected(),
+            "name": m.decompiler_name() if m.is_connected() else None,
+            "host": str(getattr(cfg, "decompiler_host", "")) if cfg is not None else "",
+            "port": str(getattr(cfg, "decompiler_port", "")) if cfg is not None else "",
+        }
+
+    def op_decompile(self, addr: int | None = None) -> dict:
+        """Whole-function decompilation (highlighted, ► on the current line)."""
+        self.require_stopped()
+        import pwndbg.dintegration as di
+
+        m = di.manager
+        if not m.is_connected():
+            return {"connected": False, "lines": None}
+        if addr is None:
+            addr = self.gdb.selected_frame().pc()
+        lines = m.decompile_pretty(addr, 1 << 20)  # "all lines" (-1 is not honored)
+        sym = None
+        try:
+            import pwndbg.aglib.symbol
+
+            sym = pwndbg.aglib.symbol.resolve_addr(addr)
+        except Exception:
+            pass
+        return {"connected": True, "name": m.decompiler_name(), "addr": addr, "sym": sym, "lines": lines}
+
+    def op_quit(self) -> None:
+        try:
+            if self.gdb.selected_inferior().pid:
+                self.gdb.execute("kill", to_string=True)
+        finally:
+            self.gdb.execute("quit")
+
+
+def main() -> None:
+    Agent().start()

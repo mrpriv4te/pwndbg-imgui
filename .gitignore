@@ -1,3 +1,7 @@
 __pycache__
 .gdb_history
 pwndbg_ImGui.ini
+build/
+dist/
+*.egg-info/
+.venv/

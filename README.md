@@ -4,14 +4,17 @@ Interface Dear ImGui (via [imgui_bundle](https://github.com/pthom/imgui_bundle))
 [pwndbg](https://pwndbg.re), façon Ghidra/IDA : toutes les sections du contexte dans des
 fenêtres dockables, plus des outils qui exploitent pwndbg directement.
 
-**Un seul fichier** : `pwndbg_imgui.py`.
-
 ## Installation
 
+Avec [pipx](https://pipx.pypa.io), dans son propre environnement (imgui-bundle inclus) :
+
 ```bash
-pip install imgui-bundle
-ln -s "$PWD/pwndbg_imgui.py" ~/.local/bin/pwndbg-imgui   # optionnel
+pipx install .                 # depuis ce dossier
+pipx install -e .              # pour développer : les modifications du code sont prises en compte
+pipx upgrade pwndbg-imgui      # après un `git pull` (sans -e : `pipx install --force .`)
 ```
+
+La commande `pwndbg-imgui` est alors disponible (`python -m pwndbg_imgui` fonctionne aussi).
 
 pwndbg doit être installé. Il est chargé, dans l'ordre :
 1. par ton `gdbinit` s'il le fait déjà,
@@ -74,8 +77,31 @@ Ctrl+F rechercher (menu Help → Keyboard shortcuts pour la liste complète).
 
 ## Fonctionnement
 
-Le script joue deux rôles. Lancé normalement, il crée un PTY pour la console gdb et un
-pour le programme, puis démarre gdb en se sourçant lui-même dedans (`runpy`) comme
-« agent » (bibliothèque standard uniquement). L'agent redirige chaque section du contexte
-vers l'interface (`contextoutput` avec un callable) et répond à des requêtes JSON
-(mémoire, vmmap, breakpoints, complétion…) sur un `socketpair` hérité.
+L'interface crée un PTY pour la console gdb et un pour le programme, puis démarre gdb en
+lui faisant charger `agent.py` **par son chemin** : gdb utilise son propre Python (celui de
+pwndbg), qui ne doit pas voir l'environnement pipx. L'agent (bibliothèque standard
+uniquement) redirige chaque section du contexte vers l'interface (`contextoutput` avec un
+callable) et répond à des requêtes JSON (mémoire, vmmap, breakpoints, complétion,
+décompilation…) sur un `socketpair` hérité.
+
+```
+src/pwndbg_imgui/
+├── cli.py            point d'entrée, options (n'importe l'interface qu'au lancement)
+├── agent.py          côté gdb (stdlib uniquement)
+├── transport.py      client RPC + PTYs
+├── term.py           mini émulateur de terminal (ANSI)
+├── theme.py          couleurs et thèmes
+├── settings.py       réglages persistants
+├── fonts.py          recherche des polices (fontconfig)
+├── payload.py        cyclic, expressions de payload, hexdump
+└── ui/
+    ├── app.py        état, process gdb, événements, runner hello_imgui
+    ├── chrome.py     menus, barre d'outils/titre/état, palette, dialogues
+    ├── panels.py     fenêtres outils (console, I/O, vmmap, breakpoints…)
+    ├── sections.py   comportement des sections du contexte
+    ├── views.py      vues mémoire, décompilateur, commandes
+    ├── widgets.py    TextView et helpers
+    ├── appearance.py polices et application du thème
+    ├── native.py     contrôle de la fenêtre GLFW (barre de titre)
+    └── catalog.py    sections et presets d'outils
+```
