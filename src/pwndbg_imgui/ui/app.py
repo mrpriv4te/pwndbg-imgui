@@ -68,6 +68,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.info: dict = {}
         self.state: dict = {}
         self.bps: list = []
+        self.bps_dirty = False  # has the session loaded/created breakpoints? (guards saving an empty list)
         self.bp_addrs: dict[int, bool] = {}
         self.bp_lines: dict[tuple[str, int], bool] = {}
         self.vmmap: list = []
@@ -162,8 +163,12 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
     def is_running(self) -> bool:
         return self.is_alive() and bool(self.state.get("running"))
 
-    def toast(self, text: str, kind: str = "info", ttl: float = 3.5) -> None:
-        self.toasts.append({"text": text, "kind": kind, "t0": time.monotonic(), "ttl": ttl})
+    def toast(self, text: str, kind: str = "info", ttl: float = 3.5, actions: list | None = None,
+              key: str | None = None) -> None:
+        if key is not None and any(t.get("key") == key for t in self.toasts):
+            return  # don't stack the same prompt twice
+        self.toasts.append({"text": text, "kind": kind, "t0": time.monotonic(), "ttl": ttl,
+                            "actions": actions, "key": key})
         self.toasts = self.toasts[-6:]
 
     def error_toast(self, err: str) -> None:
@@ -419,6 +424,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
 
     def on_bps(self, msg) -> None:
         self.bps = msg.get("bps", [])
+        if self.bps:
+            self.bps_dirty = True  # real breakpoints exist this session; safe to persist them
         self.bp_addrs = {}
         self.bp_lines = {}
         for b in self.bps:
@@ -452,11 +459,24 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
             self.rpc.request("exec", done, None, cmd="checksec")
 
     def restore_breakpoints(self) -> None:
+        """Offer to re-create the breakpoints saved for this binary (the user
+        chooses from a toast; nothing is restored without asking)."""
         if not self.settings["remember_bps"] or self.bps:
             return
         saved = self.settings.binary(self.cfg.binary).get("bps", [])
         if not saved:
             return
+        n = len(saved)
+        self.toast(
+            f"{fa.ICON_FA_CIRCLE_DOT}  Restore {n} saved breakpoint(s)?",
+            "info", ttl=12.0, key="restore_bps",
+            actions=[("Restore", lambda: self._do_restore_breakpoints(saved)), ("Dismiss", None)],
+        )
+
+    def _do_restore_breakpoints(self, saved: list) -> None:
+        if self.bps:  # the user added some in the meantime; don't duplicate silently
+            return
+        self.bps_dirty = True  # a deliberate load: persist whatever the session ends with
         for bp in saved:
             def created(out, bp=bp):
                 m = re.search(r"(?:point|Watchpoint) (\d+)", out or "")
@@ -468,7 +488,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
                                      enabled=bp.get("enabled", True), cond=bp.get("cond") or "")
 
             self.rpc.request("exec", created, None, cmd=f"{bp['kind']} {bp['where']}")
-        self.toast(f"{fa.ICON_FA_CIRCLE_DOT}  Restored {len(saved)} breakpoint(s)", "info", 4.0)
+        self.toast(f"{fa.ICON_FA_CIRCLE_DOT}  Restored {len(saved)} breakpoint(s)", "info", 3.0)
 
     def save_breakpoints(self) -> None:
         if not self.settings["remember_bps"]:
@@ -480,6 +500,10 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
             if not where or kind not in ("break", "hbreak", "watch", "rwatch", "awatch") or b.get("temp"):
                 continue
             out.append({"kind": kind, "where": where, "enabled": b["enabled"], "cond": b.get("cond")})
+        # Don't wipe the saved list when the user dismissed the restore prompt
+        # (or quit before deciding): keep remembering them for next time.
+        if not out and not self.bps_dirty:
+            return
         self.settings.binary(self.cfg.binary)["bps"] = out
 
     def sync_layout(self) -> None:

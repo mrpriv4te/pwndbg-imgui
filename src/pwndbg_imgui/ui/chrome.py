@@ -567,27 +567,43 @@ class ChromeMixin:
         vp = imgui.get_main_viewport()
         y = vp.pos.y + vp.size.y - 46
         colors = {"info": th.accent2, "ok": th.green, "warn": th.yellow, "error": th.red}
+        dismissed = []
         for i, t in enumerate(reversed(self.toasts)):
+            actions = t.get("actions")
             age = now - t["t0"]
-            alpha = min(1.0, age * 6, (t["ttl"] - age) * 2)
+            # actionable toasts stay opaque until acted on, then fade out
+            alpha = min(1.0, age * 6) if actions else min(1.0, age * 6, (t["ttl"] - age) * 2)
             imgui.set_next_window_pos(ImVec2(vp.pos.x + vp.size.x - 18, y), imgui.Cond_.always, ImVec2(1, 1))
             imgui.set_next_window_bg_alpha(0.95 * alpha)
             imgui.push_style_var(imgui.StyleVar_.alpha, max(0.0, alpha))
             imgui.push_style_var(imgui.StyleVar_.window_rounding, 8.0)
             imgui.push_style_var(imgui.StyleVar_.window_padding, ImVec2(14, 9))
             imgui.push_style_color(imgui.Col_.border, v4(colors.get(t["kind"], th.accent), 0.8))
-            flags = (imgui.WindowFlags_.no_decoration | imgui.WindowFlags_.always_auto_resize | imgui.WindowFlags_.no_inputs
+            flags = (imgui.WindowFlags_.no_decoration | imgui.WindowFlags_.always_auto_resize
                      | imgui.WindowFlags_.no_nav | imgui.WindowFlags_.no_focus_on_appearing | imgui.WindowFlags_.no_docking
                      | imgui.WindowFlags_.no_saved_settings)
+            if not actions:
+                flags |= imgui.WindowFlags_.no_inputs
             imgui.begin(f"##toast{i}", None, flags)
             if t["kind"] in ("warn", "error"):
                 imgui.text_colored(v4(colors[t["kind"]]), t["text"])
             else:
                 imgui.text_unformatted(t["text"])
+            if actions:
+                for j, (label, cb) in enumerate(actions):
+                    if j:
+                        imgui.same_line()
+                    if imgui.small_button(f"{label}##toast{i}_{j}"):
+                        if cb is not None:
+                            cb()
+                        dismissed.append(t)
             y -= imgui.get_window_height() + 8
             imgui.end()
             imgui.pop_style_color()
             imgui.pop_style_var(3)
+        for t in dismissed:
+            if t in self.toasts:
+                self.toasts.remove(t)
 
     def show_gui(self) -> None:
         self.handle_shortcuts()
