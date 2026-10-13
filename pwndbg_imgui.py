@@ -4634,6 +4634,7 @@ class App:
         rp.ini_folder_type = hello_imgui.IniFolderType.absolute_path
         rp.ini_filename = os.path.join(config_dir(), "layout.ini")
         rp.ini_clear_previous_settings = self.cfg.reset_layout
+        sanitize_window_geometry(rp.ini_filename)
 
         cb = rp.callbacks
         cb.load_additional_fonts = self.load_fonts
@@ -4686,6 +4687,48 @@ class App:
             hello_imgui.run(rp)
         finally:
             self.shutdown()
+            sanitize_window_geometry(rp.ini_filename)  # e.g. closed while minimized
+
+
+def sanitize_window_geometry(ini_path: str) -> None:
+    """Drop a saved main-window geometry that would make the window unusable.
+
+    hello_imgui saves the window size on exit; when the app was minimized it
+    records 1x1, and every later launch would open an invisible window."""
+    try:
+        with open(ini_path) as f:
+            lines = f.read().split("\n")
+    except OSError:
+        return
+    section = ""
+    bad = False
+    for line in lines:
+        if line.startswith("["):
+            section = line
+        elif section == "[AppWindow]" and line.startswith(("WindowSize=", "WindowPosition=")):
+            try:
+                x, y = (int(float(v)) for v in line.split("=", 1)[1].split(","))
+            except ValueError:
+                bad = True
+                continue
+            if line.startswith("WindowSize=") and (x < 400 or y < 300):
+                bad = True
+            if line.startswith("WindowPosition=") and (x < -10000 or y < -10000):
+                bad = True
+    if not bad:
+        return
+    out, section = [], ""
+    for line in lines:
+        if line.startswith("["):
+            section = line
+        if section == "[AppWindow]" and line.startswith(("WindowSize=", "WindowPosition=")):
+            continue
+        out.append(line)
+    try:
+        with open(ini_path, "w") as f:
+            f.write("\n".join(out))
+    except OSError:
+        pass
 
 
 def hexdump_ansi(data: bytes) -> str:
