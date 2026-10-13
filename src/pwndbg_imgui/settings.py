@@ -25,6 +25,8 @@ class Settings:
         "viewports": True,
         "custom_titlebar": True,
         "remember_bps": True,
+        "persist_pwndbg_config": True,
+        "pwndbg_config": {},  # pwndbg parameters changed in the Config pane, re-applied each run
         "decomp_autoconnect": True,
         "autofit": True,
         "io_raw": True,

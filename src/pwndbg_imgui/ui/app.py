@@ -351,10 +351,30 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.rpc.request("commands", self._set_commands)
         self.refresh_checksec()
         self.restore_breakpoints()
+        if self.info.get("pwndbg"):
+            self.apply_pwndbg_config()
         self.layout_sent = None
 
     def _set_commands(self, cmds) -> None:
         self.commands = cmds
+
+    # pwndbg config persistence ----------------------------------------------
+    # These are driven by the GUI (layout, context routing), so persisting the
+    # user's value would fight that logic. Everything else is remembered.
+    PWNDBG_CONFIG_DENY = {"context-sections", "context-output", "context-reserve-lines"}
+
+    def persist_pwndbg_param(self, name: str, value: str) -> None:
+        if not self.settings["persist_pwndbg_config"] or name in self.PWNDBG_CONFIG_DENY:
+            return
+        self.settings["pwndbg_config"][name] = value
+
+    def apply_pwndbg_config(self) -> None:
+        """Re-apply the pwndbg parameters the user changed in earlier sessions."""
+        if not self.settings["persist_pwndbg_config"]:
+            return
+        for name, value in self.settings["pwndbg_config"].items():
+            if name not in self.PWNDBG_CONFIG_DENY:
+                self.exec(f"set {name} {value}", refresh=False, quiet=True)
 
     def on_section(self, msg) -> None:
         name = msg.get("name")

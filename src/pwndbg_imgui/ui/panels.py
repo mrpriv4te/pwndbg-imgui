@@ -488,11 +488,25 @@ class PanelsMixin:
                 self.rpc.request("config", self._set_config, self.error_toast)
             imgui.text_disabled("Loading…")
             return
+        st = self.settings
+        n_saved = len(st["pwndbg_config"])
         imgui.set_next_item_width(-buttons_width(fa.ICON_FA_ARROWS_ROTATE))
         _, self.cfg_filter = imgui.input_text_with_hint("##cfgf", f"{fa.ICON_FA_FILTER} filter parameters", self.cfg_filter)
         imgui.same_line()
         if imgui.button(f"{fa.ICON_FA_ARROWS_ROTATE}##cfgr"):
             self.rpc.request("config", self._set_config, self.error_toast)
+        imgui.set_item_tooltip("Reload values from gdb")
+        _, st["persist_pwndbg_config"] = imgui.checkbox("Remember my changes across runs", st["persist_pwndbg_config"])
+        help_marker("pwndbg does not persist its config itself. When enabled, parameters you change here "
+                    "are saved and re-applied automatically on the next run "
+                    "(context routing and layout parameters are left to the GUI).")
+        if n_saved:
+            imgui.same_line()
+            imgui.text_disabled(f"· {n_saved} saved")
+            imgui.same_line()
+            if imgui.small_button("Forget##cfgforget"):
+                st["pwndbg_config"].clear()
+                self.toast("Saved pwndbg config cleared (current session unchanged)", "info", 3.0)
         flt = self.cfg_filter.lower().strip()
         flags = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.scroll_y
                  | imgui.TableFlags_.resizable)
@@ -535,6 +549,7 @@ class PanelsMixin:
             p["value"] = v
             out = "on" if v is True else ("off" if v is False else str(v))
             self.exec(f"set {name} {out}", quiet=True)
+            self.persist_pwndbg_param(name, out)
 
         if kind == "bool":
             changed, v = imgui.checkbox(f"##{name}", bool(value))
