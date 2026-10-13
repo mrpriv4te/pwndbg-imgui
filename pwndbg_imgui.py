@@ -720,6 +720,7 @@ class Settings:
         "font": "",
         "fps_idle": 20.0,
         "viewports": True,
+        "custom_titlebar": True,
         "remember_bps": True,
         "decomp_autoconnect": True,
         "autofit": True,
@@ -1531,6 +1532,78 @@ def help_marker(text: str) -> None:
         imgui.text_unformatted(text)
         imgui.pop_text_wrap_pos()
         imgui.end_tooltip()
+
+
+class NativeWindow:
+    """Just enough of GLFW (through ctypes, using the library bundled with
+    imgui_bundle) to drive a borderless main window: move, minimize, maximize."""
+
+    MAXIMIZED = 0x00020008
+    FOCUSED = 0x00020001
+    PLATFORM_WAYLAND = 0x00060003
+
+    def __init__(self) -> None:
+        import ctypes
+
+        import imgui_bundle
+
+        folder = os.path.dirname(imgui_bundle.__file__)
+        path = next((os.path.join(folder, n) for n in ("libglfw.so.3", "libglfw.so", "libglfw.3.dylib", "glfw3.dll")
+                     if os.path.exists(os.path.join(folder, n))), None)
+        if path is None:
+            raise OSError("GLFW library not found")
+        self.ct = ctypes
+        lib = ctypes.CDLL(path)
+        vp = ctypes.c_void_p
+        pint = ctypes.POINTER(ctypes.c_int)
+        pdbl = ctypes.POINTER(ctypes.c_double)
+        for name, args, res in (
+            ("glfwIconifyWindow", [vp], None), ("glfwMaximizeWindow", [vp], None),
+            ("glfwRestoreWindow", [vp], None), ("glfwGetWindowAttrib", [vp, ctypes.c_int], ctypes.c_int),
+            ("glfwGetWindowPos", [vp, pint, pint], None), ("glfwSetWindowPos", [vp, ctypes.c_int, ctypes.c_int], None),
+            ("glfwGetCursorPos", [vp, pdbl, pdbl], None),
+        ):
+            fn = getattr(lib, name)
+            fn.argtypes = args
+            fn.restype = res
+        self.lib = lib
+        self.win = ctypes.c_void_p(hello_imgui.get_glfw_window_address())
+        if not self.win.value:
+            raise OSError("no GLFW window")
+        self.can_move = True
+        if hasattr(lib, "glfwGetPlatform"):
+            lib.glfwGetPlatform.restype = ctypes.c_int
+            self.can_move = lib.glfwGetPlatform() != self.PLATFORM_WAYLAND  # Wayland forbids it
+
+    def iconify(self) -> None:
+        self.lib.glfwIconifyWindow(self.win)
+
+    def toggle_maximize(self) -> None:
+        if self.maximized():
+            self.lib.glfwRestoreWindow(self.win)
+        else:
+            self.lib.glfwMaximizeWindow(self.win)
+
+    def maximized(self) -> bool:
+        return bool(self.lib.glfwGetWindowAttrib(self.win, self.MAXIMIZED))
+
+    def focused(self) -> bool:
+        return bool(self.lib.glfwGetWindowAttrib(self.win, self.FOCUSED))
+
+    def pos(self) -> tuple[int, int]:
+        x, y = self.ct.c_int(), self.ct.c_int()
+        self.lib.glfwGetWindowPos(self.win, self.ct.byref(x), self.ct.byref(y))
+        return x.value, y.value
+
+    def set_pos(self, x: int, y: int) -> None:
+        self.lib.glfwSetWindowPos(self.win, int(x), int(y))
+
+    def cursor(self) -> tuple[float, float]:
+        """Cursor position in screen coordinates."""
+        cx, cy = self.ct.c_double(), self.ct.c_double()
+        self.lib.glfwGetCursorPos(self.win, self.ct.byref(cx), self.ct.byref(cy))
+        wx, wy = self.pos()
+        return wx + cx.value, wy + cy.value
 
 
 class TextView:
@@ -2641,6 +2714,7 @@ class LaunchConfig:
         self.no_io = False
         self.reset_layout = False
         self.no_viewports = False
+        self.maximize = False
 
 
 SECTION_META = {
@@ -2731,6 +2805,8 @@ class App:
         self.section_extra: dict[str, int] = {"stack": 0}
         self.load_more_t = 0.0
         self.gdb_idle = False  # True while gdb sits at its prompt
+        self.native: NativeWindow | None = None  # set when the themed title bar is active
+        self.titlebar_drag = None
 
         self.sections: dict[str, dict] = {}
         for name in SECTIONS:
@@ -3390,6 +3466,21 @@ class App:
         self.sync_layout()
 
     def post_init(self) -> None:
+        native = None
+        try:
+            native = NativeWindow()
+        except (OSError, AttributeError):
+            pass
+        if self.cfg.maximize and native is not None and not native.maximized():
+            native.toggle_maximize()  # the restored previous size can override the initial state
+        if hello_imgui.get_runner_params().app_window_params.borderless:
+            try:
+                self.native = native or NativeWindow()
+                if not self.native.can_move:
+                    self.toast("This Wayland session can't move a borderless window: "
+                               "disable the themed title bar in Preferences.", "warn", 10)
+            except (OSError, AttributeError) as e:
+                self.toast(f"Themed title bar unavailable: {e}", "warn", 6)
         for v in self.settings["views"]:
             if isinstance(v, dict) and v.get("cmd"):
                 self.open_cmd_view(v["cmd"], auto=v.get("auto", True), restored=True)
@@ -3494,6 +3585,10 @@ class App:
     # ── menus ───────────────────────────────────────────────────────────
     def show_menus(self) -> None:
         dp = hello_imgui.get_runner_params().docking_params
+        if self.native is not None:
+            # menu bars lay items out horizontally on their own (same_line() misbehaves there)
+            imgui.text_colored(v4(self.theme.accent), f"{fa.ICON_FA_BUG} pwndbg")
+            imgui.dummy(ImVec2(4, 0))
         if imgui.begin_menu("Debug"):
             for label, icon, shortcut, enabled, cb in self.actions():
                 if imgui.menu_item_simple(f"{getattr(fa, 'ICON_FA_' + icon)}  {label}", shortcut, False, enabled):
@@ -3583,6 +3678,69 @@ class App:
             imgui.text_disabled(f"pwndbg {self.info.get('pwndbg') or 'not loaded'}")
             imgui.text_disabled(f"gdb {self.info.get('gdb', '?')}")
             imgui.end_menu()
+        if self.native is not None:
+            self.titlebar()
+
+    def titlebar(self) -> None:
+        """Rest of the themed title bar: centered title, window buttons, dragging."""
+        nw = self.native
+        th = self.theme
+        bar_h = imgui.get_window_height()
+        win_w = imgui.get_window_width()
+        btn_w = round(bar_h * 1.45)
+        controls_w = btn_w * 3
+
+        title = APP_NAME + (f"  —  {os.path.basename(self.cfg.binary)}" if self.cfg.binary else "")
+        tw = imgui.calc_text_size(title).x
+        cx = (win_w - tw) / 2
+        if cx > imgui.get_cursor_pos_x() + 24 and cx + tw < win_w - controls_w - 24:
+            imgui.set_cursor_pos_x(cx)
+            imgui.text_colored(v4(th.fg if nw.focused() else th.dim, 0.85), title)
+
+        # window buttons, full bar height, flush right (explicit positions: menu bar layout)
+        imgui.push_style_var(imgui.StyleVar_.frame_rounding, 0.0)
+        imgui.push_style_var(imgui.StyleVar_.item_spacing, ImVec2(0, 0))
+        imgui.push_style_color(imgui.Col_.button, v4(th.bg, 0.0))
+        imgui.push_style_color(imgui.Col_.button_hovered, v4(mix(th.bg, th.fg, 0.12)))
+        imgui.push_style_color(imgui.Col_.button_active, v4(mix(th.bg, th.fg, 0.20)))
+        size = ImVec2(btn_w, bar_h)
+        imgui.set_cursor_pos(ImVec2(win_w - controls_w, 0))
+        if imgui.button(f"{fa.ICON_FA_WINDOW_MINIMIZE}##wmin", size):
+            nw.iconify()
+        imgui.set_item_tooltip("Minimize")
+        imgui.set_cursor_pos(ImVec2(win_w - controls_w + btn_w, 0))
+        icon = fa.ICON_FA_WINDOW_RESTORE if nw.maximized() else fa.ICON_FA_WINDOW_MAXIMIZE
+        if imgui.button(f"{icon}##wmax", size):
+            nw.toggle_maximize()
+        imgui.set_item_tooltip("Restore" if nw.maximized() else "Maximize")
+        imgui.set_cursor_pos(ImVec2(win_w - btn_w, 0))
+        imgui.push_style_color(imgui.Col_.button_hovered, v4(th.red, 0.85))
+        imgui.push_style_color(imgui.Col_.button_active, v4(th.red))
+        if imgui.button(f"{fa.ICON_FA_XMARK}##wclose", size):
+            hello_imgui.get_runner_params().app_shall_exit = True
+        imgui.set_item_tooltip("Close")
+        imgui.pop_style_color(5)
+        imgui.pop_style_var(2)
+
+        # drag the empty parts of the bar to move the window, double-click to maximize
+        empty = (imgui.is_window_hovered() and not imgui.is_any_item_hovered()
+                 and not imgui.is_any_item_active() and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id))
+        if empty and imgui.is_mouse_double_clicked(0):
+            nw.toggle_maximize()
+            self.titlebar_drag = None
+        elif empty and imgui.is_mouse_clicked(0) and nw.can_move:
+            self.titlebar_drag = (nw.cursor(), nw.pos(), False)
+        if self.titlebar_drag is not None:
+            if imgui.is_mouse_down(0):
+                (sx, sy), (wx, wy), moved = self.titlebar_drag
+                x, y = nw.cursor()
+                if moved or abs(x - sx) + abs(y - sy) > 4:
+                    if not moved and nw.maximized():
+                        nw.toggle_maximize()  # dragging a maximized window un-maximizes it
+                    self.titlebar_drag = ((sx, sy), (wx, wy), True)
+                    nw.set_pos(wx + x - sx, wy + y - sy)
+            else:
+                self.titlebar_drag = None
 
     def _window_toggle(self, dp, label: str) -> None:
         dw = dp.dockable_window_of_name(label)
@@ -4365,6 +4523,9 @@ class App:
         if changed:
             self.set_code_size(round(v))
         imgui.separator_text("Behavior")
+        changed, st["custom_titlebar"] = imgui.checkbox("Themed title bar (instead of the system one)", st["custom_titlebar"])
+        if changed:
+            self.toast("Applies on next start", "info")
         _, st["autofit"] = imgui.checkbox("Fit context sections to their window", st["autofit"])
         help_marker("Disassembly, stack, source, backtrace and threads show exactly as many lines as fit.")
         _, st["remember_bps"] = imgui.checkbox("Remember breakpoints per binary", st["remember_bps"])
@@ -4667,6 +4828,15 @@ class App:
         rp.app_window_params.window_title = title
         rp.app_window_params.window_geometry.size = (1680, 1000)
         rp.app_window_params.restore_previous_geometry = True
+        if self.cfg.maximize:
+            rp.app_window_params.window_geometry.window_size_state = hello_imgui.WindowSizeState.maximized
+        if self.settings["custom_titlebar"]:
+            # we draw the title bar ourselves (see titlebar()); keep hello_imgui's resize handling
+            rp.app_window_params.borderless = True
+            rp.app_window_params.borderless_movable = False
+            rp.app_window_params.borderless_closable = False
+            rp.app_window_params.borderless_resizable = True
+            rp.app_window_params.borderless_highlight_color = v4(self.theme.accent, 0.35)
         rp.imgui_window_params.default_imgui_window_type = hello_imgui.DefaultImGuiWindowType.provide_full_screen_dock_space
         rp.imgui_window_params.enable_viewports = self.settings["viewports"] and not self.cfg.no_viewports
         rp.imgui_window_params.show_menu_bar = True
@@ -4860,6 +5030,7 @@ GUI options:
   --font-size N       font size
   --no-io             do not give the program its own terminal pane
   --no-viewports      keep every window inside the main window
+  --maximize          start with the main window maximized
   --reset-layout      start with the default window layout
   --list-themes       list themes and exit
   -h, --help          show this help
@@ -4917,6 +5088,8 @@ def parse_args(argv: list[str]) -> LaunchConfig:
             cfg.init = "none"
         elif a == "--no-io":
             cfg.no_io = True
+        elif a == "--maximize":
+            cfg.maximize = True
         elif a == "--no-viewports":
             cfg.no_viewports = True
         elif a == "--reset-layout":

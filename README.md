@@ -33,7 +33,7 @@ pwndbg-imgui -ex 'target remote :1234' ./chall
 ```
 
 Options de l'interface : `--gdb PATH`, `--pwndbg PATH`, `--init-cmd CMD`, `--no-pwndbg`,
-`--theme NAME`, `--font PATH`, `--font-size N`, `--no-io`, `--no-viewports`,
+`--theme NAME`, `--font PATH`, `--font-size N`, `--no-io`, `--no-viewports`, `--maximize`,
 `--reset-layout`, `--list-themes` (voir `--help`).
 
 ## Fonctionnalités
@@ -62,6 +62,8 @@ Options de l'interface : `--gdb PATH`, `--pwndbg PATH`, `--init-cmd CMD`, `--no-
   (générer, envoyer au programme, retrouver un offset depuis `$pc`/`$sp`).
 - **Palette de commandes** (Ctrl+P), barre d'outils (Run/Start/Continue/Pause/Step…),
   barre d'état (pid, arch, checksec, légende), notifications (breakpoint, signal, exit).
+- **Barre de titre intégrée** au thème (glisser pour déplacer, double-clic pour maximiser ;
+  désactivable dans Preferences pour retrouver celle du système).
 - **13 thèmes** (sombres et clairs, contraste corrigé automatiquement), zoom du code
   (Ctrl+molette), polices système, layout et réglages persistants
   (`~/.config/pwndbg-imgui/`).
