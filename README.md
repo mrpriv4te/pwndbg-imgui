@@ -1,89 +1,79 @@
-# pwndbg ImGui Wrapper
+# pwndbg-imgui
 
-Interface graphique pyimgui (via [imgui_bundle](https://github.com/pthom/imgui_bundle)) pour
-afficher les sections de contexte pwndbg dans des fenêtres dockables, comme dans Ghidra :
-drag & drop d'une fenêtre sur une autre = onglets ; détachable en fenêtre flottante (viewports).
+Interface Dear ImGui (via [imgui_bundle](https://github.com/pthom/imgui_bundle)) pour
+[pwndbg](https://pwndbg.re), façon Ghidra/IDA : toutes les sections du contexte dans des
+fenêtres dockables, plus des outils qui exploitent pwndbg directement.
+
+**Un seul fichier** : `pwndbg_imgui.py`.
 
 ## Installation
 
 ```bash
 pip install imgui-bundle
+ln -s "$PWD/pwndbg_imgui.py" ~/.local/bin/pwndbg-imgui   # optionnel
 ```
 
-Pwndbg doit être installé et chargé dans gdb (cf https://pwndbg.re/stable/setup/).
+pwndbg doit être installé. Il est chargé, dans l'ordre :
+1. par ton `gdbinit` s'il le fait déjà,
+2. sinon via une commande utilisateur `init-pwndbg` si elle existe,
+3. sinon depuis `$PWNDBG_PATH`, `~/.local/share/pwndbg`, `~/pwndbg`, `/usr/share/pwndbg`…
 
-## Lancement
+(ou explicitement : `--pwndbg ~/chemin/pwndbg`, `--init-cmd init-pwndbg`).
 
-Terminal 1 — lance gdb + pwndbg avec la config `contextoutput` automatique :
+## Utilisation
+
+Comme `pwndbg` / `gdb` : tout ce qui n'est pas une option de l'interface est passé à gdb.
 
 ```bash
-python3 pwndbg_launcher.py ./mon_binaire
+pwndbg-imgui ./chall
+pwndbg-imgui --args ./chall arg1 arg2
+pwndbg-imgui -p 1234
+pwndbg-imgui ./chall core
+pwndbg-imgui -ex 'target remote :1234' ./chall
 ```
 
-Cela crée un PTY par section (`regs`, `disasm`, `code`, `stack`, `backtrace`,
-`args`, `threads`, `heap_tracker`, `expressions`, `last_signal`) et appelle
-`contextoutput <section> <tty> True` pour chacune via un fichier gdbinit
-temporaire (cf [doc officielle](https://pwndbg.re/stable/tutorials/splitting-the-context/)).
+Options de l'interface : `--gdb PATH`, `--pwndbg PATH`, `--init-cmd CMD`, `--no-pwndbg`,
+`--theme NAME`, `--font PATH`, `--font-size N`, `--no-io`, `--no-viewports`,
+`--reset-layout`, `--list-themes` (voir `--help`).
 
-Terminal 2 — lance l'interface :
+## Fonctionnalités
 
-```bash
-python3 gui.py
-```
+- **Contexte pwndbg** : Registers, Disassembly, Source, Stack, Backtrace, Arguments, Watch,
+  Threads, Heap Tracker, Last Signal. Chaque section s'adapte à la taille de sa fenêtre
+  (disasm/stack/source/backtrace affichent exactement le nombre de lignes visibles) et
+  seules les sections affichées sont calculées.
+- **Adresses cliquables partout** : survol = région mémoire + chaîne de déréférencement
+  pwndbg ; Ctrl+clic = ouvrir dans la vue mémoire ; clic droit = telescope, désassembler,
+  xinfo, chercher les pointeurs, breakpoint, watchpoint…
+- **Breakpoints** : clic dans la marge de Disassembly/Source, fenêtre dédiée (activer,
+  conditions, compteurs de hits, watchpoints), mémorisés par binaire.
+- **Console gdb** : couleurs, historique persistant, complétion Tab (via gdb), Entrée vide
+  = répéter la dernière commande, Ctrl+C = interrompre.
+- **Program I/O** : le programme débogué a son propre terminal (stdin/stdout séparés de
+  gdb), en mode brut (binary-safe). Envoi en texte, hex ou expression Python façon
+  pwntools (`b"A"*40 + p64(0x401136)`, `flat(...)`, `cyclic(100)`), octets non
+  imprimables affichés en `\xNN`, vue hexdump de la sortie.
+- **Mémoire** : hexdump/qwords colorés par région (légende pwndbg), octets modifiés depuis
+  le dernier arrêt surlignés, édition en place (tape des chiffres hexa), suivi automatique
+  d'une expression (`$sp`, `$rdi`…), inspecteur de valeurs.
+- **VMMap**, **navigateur de commandes pwndbg** (aide intégrée), **éditeur de la config
+  pwndbg**, **vues de commandes** live (n'importe quelle commande, rafraîchie à chaque
+  arrêt : `heap`, `bins`, `vis_heap_chunks`, `got`, `telescope`…), **pattern cyclic**
+  (générer, envoyer au programme, retrouver un offset depuis `$pc`/`$sp`).
+- **Palette de commandes** (Ctrl+P), barre d'outils (Run/Start/Continue/Pause/Step…),
+  barre d'état (pid, arch, checksec, légende), notifications (breakpoint, signal, exit).
+- **13 thèmes** (sombres et clairs, contraste corrigé automatiquement), zoom du code
+  (Ctrl+molette), polices système, layout et réglages persistants
+  (`~/.config/pwndbg-imgui/`).
 
-⚠️ `pwndbg_launcher.py` et `gui.py` doivent partager les mêmes PTYs : actuellement
-chacun crée son propre `PtyManager`. Pour une vraie utilisation, il faut soit :
+Raccourcis : F5 continue/run · F6 pause · F7/F8 si/ni · Shift+F7/F8 step/next ·
+Ctrl+F7 finish · Shift+F5 kill · Ctrl+P palette · Ctrl+G aller à une adresse ·
+Ctrl+F rechercher (menu Help → Keyboard shortcuts pour la liste complète).
 
-- lancer les deux dans **le même process** (le plus simple — voir `run_combined.py`
-  ci-dessous), soit
-- faire communiquer les chemins de PTY entre les deux process (ex: fichier JSON
-  partagé, socket Unix).
+## Fonctionnement
 
-## Usage de l'UI
-
-- **Menu "Window"** (top bar) : coche/décoche chaque section pour
-  l'afficher/masquer, ainsi que **"GDB Console"**.
-- **GDB Console** : fenêtre dockable affichant stdout/stderr de gdb (PTY
-  dédié) avec un champ de saisie en bas pour envoyer des commandes
-  directement à gdb (Entrée pour valider, flèches haut/bas pour
-  l'historique). C'est une vraie console gdb : tu peux y taper
-  `b main`, `run`, `c`, `next`, etc.
-- **Drag & drop** d'un onglet de fenêtre sur une autre fenêtre : fusionne en
-  onglets dans le même panneau (comportement natif du docking ImGui).
-- Drag & drop hors de toute zone de dock : détache la fenêtre en fenêtre OS
-  flottante séparée (si `enable_viewports = True`, déjà activé).
-- **Menu "View"** : active/désactive l'auto-scroll par section (et pour la
-  console).
-- **"Reset layout"** : recrée le layout de dock par défaut
-  (disasm/code en haut-gauche, regs à droite, stack/backtrace/console en bas).
-
-## Couleurs ANSI
-
-Les sorties pwndbg sont colorées via des séquences ANSI SGR (`\x1b[31m...`).
-`ansi.py` parse ces séquences (couleurs 0-15, 256 couleurs, RGB direct, bold,
-underline, reverse) et `render_ansi_text()` dans `gui.py` affiche chaque
-ligne comme une suite de `imgui.text_colored` + `same_line()`, ce qui
-préserve les couleurs originales de regs/disasm/etc. directement dans
-l'UI (au lieu de `input_text_multiline`, qui ne supporte pas le texte
-coloré).
-
-## Lancement combiné (recommandé)
-
-Pour éviter le problème de PTYs séparés, lance tout depuis un seul script :
-
-```python
-# run_combined.py
-import threading
-from pty_manager import PtyManager
-from pwndbg_launcher import PwndbgLauncher
-from gui import main_with_manager  # variante de main() acceptant un PtyManager existant
-
-pm = PtyManager()
-launcher = PwndbgLauncher(pty_manager=pm, binary="./mon_binaire")
-launcher.start()  # lance gdb dans un sous-process, hérite du terminal courant
-
-main_with_manager(pm)  # lance la fenêtre ImGui (bloquant)
-
-launcher.stop()
-pm.close_all()
-```
+Le script joue deux rôles. Lancé normalement, il crée un PTY pour la console gdb et un
+pour le programme, puis démarre gdb en se sourçant lui-même dedans (`runpy`) comme
+« agent » (bibliothèque standard uniquement). L'agent redirige chaque section du contexte
+vers l'interface (`contextoutput` avec un callable) et répond à des requêtes JSON
+(mémoire, vmmap, breakpoints, complétion…) sur un `socketpair` hérité.
