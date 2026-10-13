@@ -287,7 +287,8 @@ class Agent:
         ev.new_objfile.connect(lambda e: self.send({"ev": "objfile"}))
         ev.breakpoint_created.connect(lambda b: self.send_breakpoints())
         ev.breakpoint_modified.connect(lambda b: self.send_breakpoints())
-        ev.breakpoint_deleted.connect(lambda b: self.send_breakpoints())
+        # fired *before* gdb drops the breakpoint: leave it out explicitly
+        ev.breakpoint_deleted.connect(lambda b: self.send_breakpoints(exclude=b.number))
         ev.memory_changed.connect(lambda e: self.send({"ev": "memory"}))
         ev.register_changed.connect(lambda e: self.send({"ev": "memory"}))
         ev.before_prompt.connect(self.on_prompt)
@@ -315,9 +316,10 @@ class Agent:
     def on_prompt(self) -> None:
         self.send({"ev": "state", "state": self.op_state()})
 
-    def send_breakpoints(self) -> None:
+    def send_breakpoints(self, exclude: int | None = None) -> None:
         try:
-            self.send({"ev": "bps", "bps": self.op_breakpoints()})
+            bps = [b for b in self.op_breakpoints() if b["num"] != exclude]
+            self.send({"ev": "bps", "bps": bps})
         except Exception:
             pass
 
@@ -725,6 +727,7 @@ class Settings:
         "io_echo": True,
         "io_newline": True,
         "console_history": [],
+        "io_history": [],
         "binaries": {},
         "views": [],
         "visible": {},
@@ -751,6 +754,7 @@ class Settings:
 
     def save(self) -> None:
         self.data["console_history"] = self.data["console_history"][-500:]
+        self.data["io_history"] = self.data["io_history"][-200:]
         tmp = self.path + ".tmp"
         try:
             with open(tmp, "w") as f:
@@ -1496,6 +1500,12 @@ def v4(c, a: float = 1.0):
 def ctrl_pressed(key) -> bool:
     io = imgui.get_io()
     return io.key_ctrl and not io.key_alt and imgui.is_key_pressed(key, False)
+
+
+def buttons_width(*labels: str) -> float:
+    """Room taken by buttons placed after an item with same_line()."""
+    st = imgui.get_style()
+    return sum(imgui.calc_text_size(lbl.split("##")[0]).x + st.frame_padding.x * 2 + st.item_spacing.x for lbl in labels)
 
 
 def combo_width(longest: str) -> float:
@@ -2748,6 +2758,8 @@ class App:
         # program io
         self.io_input = ""
         self.io_mode = "text"
+        self.io_history: list[dict] = [h for h in st["io_history"] if isinstance(h, dict)]
+        self.io_history_pos = -1
         self.io_view_mode = "terminal"
         # misc tool state
         self.goto_input = ""
@@ -3388,6 +3400,7 @@ class App:
         st = self.settings
         st["views"] = [{"cmd": v.cmd, "auto": v.auto} for v in self.cmd_views]
         st["console_history"] = self.history
+        st["io_history"] = self.io_history
         st["ui_size"] = self.ui_size
         st["code_size"] = self.code_size
         st.binary(self.cfg.binary)["args"] = self.args_input
@@ -3658,7 +3671,8 @@ class App:
         imgui.set_item_tooltip("Command palette  [Ctrl+P]")
         # state badge, right aligned
         text, color = self.state_text()
-        w = imgui.calc_text_size(text).x + 24
+        pad = 12.0
+        w = pad + 8 + 8 + imgui.calc_text_size(text).x + pad  # pad | dot | gap | text | pad
         imgui.same_line(max(imgui.get_cursor_pos_x(), imgui.get_window_width() - w - 12))
         dl = imgui.get_window_draw_list()
         x = imgui.get_cursor_screen_pos().x
@@ -3666,8 +3680,8 @@ class App:
         cy = imgui.get_window_pos().y + imgui.get_window_height() / 2  # center of the toolbar
         pill_h = h + 8
         dl.add_rect_filled(ImVec2(x, cy - pill_h / 2), ImVec2(x + w, cy + pill_h / 2), u32(color, 0.16), pill_h / 2)
-        dl.add_circle_filled(ImVec2(x + 11, cy), 4.0, u32(color))
-        dl.add_text(ImVec2(x + 20, cy - h / 2), u32(color), text)
+        dl.add_circle_filled(ImVec2(x + pad + 4, cy), 4.0, u32(color))
+        dl.add_text(ImVec2(x + pad + 16, cy - h / 2), u32(color), text)
         imgui.dummy(ImVec2(w, 1))
         imgui.pop_style_var(2)
 
@@ -3740,12 +3754,19 @@ class App:
                 if imgui.button("Toggle stop on error##ht"):
                     self.exec("track-heap toggle-break")
                 imgui.end_disabled()
+                imgui.push_text_wrap_pos(0)
+                imgui.text_colored(
+                    v4(self.theme.yellow),
+                    f"{fa.ICON_FA_TRIANGLE_EXCLAMATION}  While tracking is enabled, don't call allocator functions from "
+                    "gdb (call malloc(16), call free(p), …): the tracker cannot follow calls made by gdb, the program "
+                    "stops inside the function and later allocations may go untracked. Disable tracking first.")
+                imgui.pop_text_wrap_pos()
             sec["view"].render()
 
         return gui
 
     def _watch_bar(self) -> None:
-        imgui.set_next_item_width(-imgui.calc_text_size(" Add  Cmd ").x - 30)
+        imgui.set_next_item_width(-buttons_width("Add", "Cmd"))
         entered, self.watch_input = imgui.input_text_with_hint(
             "##watch", "expression to watch, e.g. *(long*)$rdi", self.watch_input, imgui.InputTextFlags_.enter_returns_true)
         imgui.same_line()
@@ -3923,15 +3944,33 @@ class App:
 
         imgui.text_colored(v4(th.accent2), fa.ICON_FA_KEYBOARD)
         imgui.same_line()
-        imgui.set_next_item_width(-imgui.calc_text_size("Send").x - imgui.get_style().frame_padding.x * 2 - 8)
+        imgui.set_next_item_width(-buttons_width("Send"))
         imgui.push_font(self.mono, self.code_size)
         entered, self.io_input = imgui.input_text_with_hint(
-            "##io_in", "input for the program (Enter to send)", self.io_input, imgui.InputTextFlags_.enter_returns_true)
+            "##io_in", "input for the program (Enter to send, Up/Down: history)", self.io_input,
+            imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.callback_history, self._io_history_cb)
         imgui.pop_font()
         imgui.same_line()
         if (imgui.button("Send##io") or entered) and (self.io_input or st["io_newline"]):
             self.send_io(self.io_input)
             imgui.set_keyboard_focus_here(-1)
+
+    def _io_history_cb(self, data) -> int:
+        hist = self.io_history
+        if not hist:
+            return 0
+        if data.event_key == imgui.Key.up_arrow:
+            self.io_history_pos = len(hist) - 1 if self.io_history_pos == -1 else max(0, self.io_history_pos - 1)
+        elif data.event_key == imgui.Key.down_arrow and self.io_history_pos != -1:
+            self.io_history_pos += 1
+            if self.io_history_pos >= len(hist):
+                self.io_history_pos = -1
+        entry = hist[self.io_history_pos] if self.io_history_pos != -1 else {"text": ""}
+        if entry.get("mode") in ("text", "python", "hex"):
+            self.io_mode = entry["mode"]  # a payload comes back with the mode it was sent in
+        data.delete_chars(0, data.buf_text_len)
+        data.insert_chars(0, entry["text"])
+        return 0
 
     def send_io(self, text: str) -> None:
         try:
@@ -3947,6 +3986,10 @@ class App:
         self.io.write(data)
         if self.settings["io_echo"]:
             self.io_term.feed(data.decode("utf-8", errors="surrogateescape"), ECHO)
+        entry = {"mode": self.io_mode, "text": text}
+        if text and (not self.io_history or self.io_history[-1] != entry):
+            self.io_history.append(entry)
+        self.io_history_pos = -1
         self.io_input = ""
 
     def memory_gui(self) -> None:
@@ -3954,7 +3997,7 @@ class App:
 
     def vmmap_gui(self) -> None:
         th = self.theme
-        imgui.set_next_item_width(-imgui.calc_text_size(" Refresh ").x - 20)
+        imgui.set_next_item_width(-buttons_width(fa.ICON_FA_ARROWS_ROTATE))
         _, self.vmmap_filter = imgui.input_text_with_hint("##vmf", f"{fa.ICON_FA_FILTER} filter (name, perms, address)", self.vmmap_filter)
         imgui.same_line()
         if imgui.button(f"{fa.ICON_FA_ARROWS_ROTATE}##vmr") and self.is_stopped():
@@ -4025,13 +4068,18 @@ class App:
 
     def breakpoints_gui(self) -> None:
         th = self.theme
-        imgui.set_next_item_width(-imgui.calc_text_size(" Break  Temp  Watch  RWatch ").x - 40)
+        buttons = (("break", "Break", "Software breakpoint"), ("tbreak", "Temp", "Temporary breakpoint"),
+                   ("watch", "Watch", "Write watchpoint"), ("rwatch", "RWatch", "Read watchpoint"))
+        buttons_w = buttons_width(*(b[1] for b in buttons))
+        # keep the buttons on the input's line when it leaves the input usable room, else wrap them
+        inline = imgui.get_content_region_avail().x - buttons_w >= imgui.get_font_size() * 10
+        imgui.set_next_item_width(-buttons_w if inline else -1)
         entered, self.bp_input = imgui.input_text_with_hint(
             "##bpin", "main · *0x401136 · file.c:42 · $rip+8 · var", self.bp_input, imgui.InputTextFlags_.enter_returns_true)
         where = self.bp_input.strip()
-        for kind, label, tip in (("break", "Break", "Software breakpoint"), ("tbreak", "Temp", "Temporary breakpoint"),
-                                 ("watch", "Watch", "Write watchpoint"), ("rwatch", "RWatch", "Read watchpoint")):
-            imgui.same_line()
+        for i, (kind, label, tip) in enumerate(buttons):
+            if inline or i:
+                imgui.same_line()
             if (imgui.button(f"{label}##bp") or (entered and kind == "break")) and where:
                 self.exec(f"{kind} {where}", refresh=False)
                 self.bp_input = ""
@@ -4154,7 +4202,7 @@ class App:
                 self.rpc.request("config", self._set_config, self.error_toast)
             imgui.text_disabled("Loading…")
             return
-        imgui.set_next_item_width(-imgui.calc_text_size(" Reload ").x - 20)
+        imgui.set_next_item_width(-buttons_width(fa.ICON_FA_ARROWS_ROTATE))
         _, self.cfg_filter = imgui.input_text_with_hint("##cfgf", f"{fa.ICON_FA_FILTER} filter parameters", self.cfg_filter)
         imgui.same_line()
         if imgui.button(f"{fa.ICON_FA_ARROWS_ROTATE}##cfgr"):
