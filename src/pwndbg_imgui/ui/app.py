@@ -54,7 +54,10 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.fonts = find_mono_fonts()
 
         self.console_term = Term(max_lines=20000)
-        self.console = Pty(self.console_term)
+        # attached mode (`init-pwndbg-ui`): gdb runs in the user's terminal, we don't own it
+        self.attached = cfg.attach_fd is not None
+        self.console = None if self.attached else Pty(self.console_term)
+        self.last_console_cmd = ""
         self.io_term = Term(max_lines=20000, show_ctrl=True)
         self.io = None if cfg.no_io else Pty(self.io_term, raw=st["io_raw"], keep_bytes=1 << 20)
         self.io_hex_term = Term(max_lines=100000)
@@ -168,7 +171,30 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
 
     def send_console(self, cmd: str) -> None:
         self.gdb_idle = False
-        self.console.write((cmd + "\n").encode())
+        if self.console is not None:
+            self.console.write((cmd + "\n").encode())
+            return
+        # attached mode: run it through the agent and show it like a terminal would
+        cmd = cmd or self.last_console_cmd  # empty line repeats, as in gdb
+        self.last_console_cmd = cmd
+        with self.console_term.lock:
+            if self.console_term.col:
+                self.console_term.feed("\n")
+            self.console_term.feed(f"\x1b[1;31mpwndbg>\x1b[0m {cmd}\n")
+        if not cmd or not self.rpc:
+            self.gdb_idle = True
+            return
+
+        def done(out):
+            self.gdb_idle = True
+            if out:
+                self.console_term.feed(out if out.endswith("\n") else out + "\n")
+
+        def fail(err):
+            self.gdb_idle = True
+            self.console_term.feed(f"\x1b[31m{err}\x1b[0m\n")
+
+        self.rpc.request("console", done, fail, cmd=cmd)
 
     def exec(self, cmd: str, refresh: bool = True, cb=None, quiet: bool = False) -> None:
         if not self.rpc:
@@ -188,7 +214,10 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
     def interrupt(self) -> None:
         import signal
 
-        if self.proc and self.proc.poll() is None:
+        if self.attached:
+            if self.cfg.gdb_pid:
+                os.kill(self.cfg.gdb_pid, signal.SIGINT)
+        elif self.proc and self.proc.poll() is None:
             os.kill(self.proc.pid, signal.SIGINT)
 
     def page_for(self, addr: int | None):
@@ -309,6 +338,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
 
     def on_hello(self, msg) -> None:
         self.info = msg.get("info", {})
+        if self.cfg.binary is None and self.info.get("file"):
+            self.cfg.binary = self.info["file"]  # attached mode: learn it from gdb
         if not self.info.get("pwndbg"):
             self.toast("pwndbg was not loaded: context panes are disabled. Use --pwndbg PATH.", "warn", 12)
         self.rpc.request("state", lambda st: self.state.update(st))
@@ -579,6 +610,16 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
     def shutdown(self) -> None:
         import signal
 
+        if self.attached:
+            # leave gdb running: closing the socket makes the agent give the
+            # context back to the user's terminal
+            if self.rpc:
+                try:
+                    self.rpc.sock.close()
+                except OSError:
+                    pass
+            return
+
         proc = self.proc
         if proc is None or proc.poll() is not None:
             return
@@ -682,7 +723,10 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         return rp
 
     def run(self) -> None:
-        self.spawn_gdb()
+        if self.attached:
+            self.rpc = Rpc(socket.socket(fileno=self.cfg.attach_fd))
+        else:
+            self.spawn_gdb()
         rp = self.build_runner()
         try:
             hello_imgui.run(rp)

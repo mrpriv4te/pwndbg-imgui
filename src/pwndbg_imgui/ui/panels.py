@@ -64,7 +64,8 @@ class PanelsMixin:
         th = self.theme
         footer = imgui.get_frame_height_with_spacing() + 2
         self.console_view.render(-footer)
-        self.console.resize(self.console_view.rows, self.console_view.cols)
+        if self.console is not None:
+            self.console.resize(self.console_view.rows, self.console_view.cols)
         if self.completions:
             n = min(len(self.completions), 12)
             imgui.set_next_window_pos(imgui.get_cursor_screen_pos(), imgui.Cond_.always, ImVec2(0, 1))
@@ -165,7 +166,11 @@ class PanelsMixin:
         th = self.theme
         st = self.settings
         if self.io is None:
-            imgui.text_disabled("Program I/O is disabled (--no-io): the program shares the gdb console.")
+            if self.attached:
+                imgui.text_disabled("This GUI is attached to an existing gdb session (init-pwndbg-ui): the program's "
+                                    "input/output belong to whoever started it (e.g. your pwntools script).")
+            else:
+                imgui.text_disabled("Program I/O is disabled (--no-io): the program shares the gdb console.")
             return
         # header
         imgui.set_next_item_width(combo_width("Python expr"))

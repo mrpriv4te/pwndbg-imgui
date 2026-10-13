@@ -39,6 +39,28 @@ Options de l'interface : `--gdb PATH`, `--pwndbg PATH`, `--init-cmd CMD`, `--no-
 `--theme NAME`, `--font PATH`, `--font-size N`, `--no-io`, `--no-viewports`, `--maximize`,
 `--reset-layout`, `--list-themes` (voir `--help`).
 
+### S'attacher à une session gdb existante (`init-pwndbg-ui`)
+
+Pour ouvrir l'interface depuis un gdb déjà lancé (utile avec `gdb.debug`/`gdb.attach` de
+pwntools), ajoute une fois la commande `init-pwndbg-ui` à ton gdbinit :
+
+```bash
+pwndbg-imgui --gdbinit >> ~/.config/gdb/gdbinit
+```
+
+Ensuite, dans n'importe quelle session gdb :
+
+```
+(gdb) init-pwndbg-ui        # charge pwndbg si besoin puis ouvre l'interface, attachée à ce gdb
+```
+
+gdb reste dans son terminal (c'est là que vivent le programme et sa saisie) ; l'interface
+affiche le contexte et pilote gdb. Fermer l'interface rend le contexte au terminal.
+`$PWNDBG_IMGUI_ARGS` passe des options (ex. `export PWNDBG_IMGUI_ARGS=--maximize`).
+
+Dans un script pwntools, il suffit d'ajouter `init-pwndbg-ui` au `gdbscript` (cf.
+`exploit.py` : `./exploit.py -d ui`).
+
 ## Fonctionnalités
 
 - **Contexte pwndbg** : Registers, Disassembly, Source, Stack, Backtrace, Arguments, Watch,
@@ -77,12 +99,19 @@ Ctrl+F rechercher (menu Help → Keyboard shortcuts pour la liste complète).
 
 ## Fonctionnement
 
-L'interface crée un PTY pour la console gdb et un pour le programme, puis démarre gdb en
-lui faisant charger `agent.py` **par son chemin** : gdb utilise son propre Python (celui de
-pwndbg), qui ne doit pas voir l'environnement pipx. L'agent (bibliothèque standard
+Deux modes, mais le même agent côté gdb :
+
+- **Lancé par l'interface** (`pwndbg-imgui ./chall`) : l'interface crée un PTY pour la
+  console gdb et un pour le programme, puis démarre gdb en lui faisant charger `agent.py`.
+- **Attaché** (`init-pwndbg-ui` dans un gdb existant) : gdb garde son terminal ; `agent.attach()`
+  lance l'interface et lui passe un `socketpair`. Fermer l'interface rend le contexte au
+  terminal (l'agent se désenregistre proprement).
+
+Dans les deux cas gdb charge `agent.py` **par son chemin** : gdb utilise son propre Python
+(celui de pwndbg), qui ne doit pas voir l'environnement pipx. L'agent (bibliothèque standard
 uniquement) redirige chaque section du contexte vers l'interface (`contextoutput` avec un
 callable) et répond à des requêtes JSON (mémoire, vmmap, breakpoints, complétion,
-décompilation…) sur un `socketpair` hérité.
+décompilation, console…) sur le `socketpair`.
 
 ```
 src/pwndbg_imgui/

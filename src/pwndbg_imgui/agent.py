@@ -10,7 +10,6 @@ from __future__ import annotations
 import functools
 import json
 import os
-import re
 import socket
 import sys
 import threading
@@ -59,13 +58,22 @@ PWNDBG_CANDIDATE_PATHS = (
 
 
 class Agent:
-    def __init__(self) -> None:
+    """Bridge between gdb/pwndbg and the GUI.
+
+    `attached` is False when the GUI launched gdb (the GUI owns gdb's terminal) and
+    True when the GUI was started from an existing gdb session (`init-pwndbg-ui`):
+    the user's terminal is left alone and the GUI console goes through `op_console`.
+    """
+
+    def __init__(self, sock: socket.socket, attached: bool = False) -> None:
         import gdb
 
         self.gdb = gdb
-        fd = int(os.environ.pop(ENV_FD))
-        os.set_inheritable(fd, False)  # never leak the socket to the inferior
-        self.sock = socket.socket(fileno=fd)
+        self.sock = sock
+        self.attached = attached
+        self.closed = False
+        self.handlers: list[tuple[object, object]] = []  # (event registry, callback)
+        self.saved_sections: str | None = None
         self.wlock = threading.Lock()
         self.writers: dict[str, object] = {}
         self.geom: dict[str, tuple] = {}
@@ -100,6 +108,7 @@ class Agent:
                 except ValueError:
                     continue
                 self.gdb.post_event(functools.partial(self.handle, req))
+        self.gdb.post_event(self.detach)  # the GUI is gone
 
     def handle(self, req: dict) -> None:
         rid = req.get("id")
@@ -135,7 +144,10 @@ class Agent:
         elif spec.startswith("cmd:"):
             candidates.append(("cmd", spec[len("cmd:"):]))
         else:
-            if re.search(r"^init-pwndbg\b", self.quiet("help user-defined"), re.M):
+            # exact name only: gdb would happily run `init-pwndbg` as an abbreviation
+            # of another command (like `init-pwndbg-ui`, which would recurse)
+            user_cmds = {line.split(" -- ")[0].strip() for line in self.quiet("help user-defined").splitlines()}
+            if "init-pwndbg" in user_cmds:
                 candidates.append(("cmd", "init-pwndbg"))
             env_path = os.environ.get("PWNDBG_PATH")
             if env_path:
@@ -230,22 +242,26 @@ class Agent:
 
     def start(self) -> None:
         gdb = self.gdb
-        tty = os.environ.pop(ENV_TTY, "")
-        spec = os.environ.pop(ENV_INIT, "auto")
-        for var in (ENV_FD, ENV_TTY, ENV_INIT):
-            self.quiet(f"unset environment {var}")
-
-        self.load_pwndbg(spec)
-        for cmd in (
-            "set editing off",
-            "set pagination off",
-            "set confirm off",
-            "set height 0",
-            "set width 0",
-        ):
-            self.quiet(cmd)
-        if tty:
-            self.quiet(f"set inferior-tty {tty}")
+        if self.attached:
+            # gdb belongs to the user's terminal: only what the GUI cannot work without.
+            # In tmux, a user `init-pwndbg` may split panes for the context (splitmind):
+            # pointless with the GUI, so hide tmux while pwndbg loads.
+            tmux = {k: os.environ.pop(k) for k in ("TMUX_PANE",) if k in os.environ}
+            try:
+                self.load_pwndbg("auto")
+            finally:
+                os.environ.update(tmux)
+            self.quiet("set pagination off")
+        else:
+            tty = os.environ.pop(ENV_TTY, "")
+            spec = os.environ.pop(ENV_INIT, "auto")
+            for var in (ENV_FD, ENV_TTY, ENV_INIT):
+                self.quiet(f"unset environment {var}")
+            self.load_pwndbg(spec)
+            for cmd in ("set editing off", "set pagination off", "set confirm off", "set height 0", "set width 0"):
+                self.quiet(cmd)
+            if tty:
+                self.quiet(f"set inferior-tty {tty}")
 
         if self.pwndbg_loaded():
             import pwndbg
@@ -253,6 +269,7 @@ class Agent:
 
             self.pwndbg = pwndbg
             self.ctx = ctx
+            self.saved_sections = ctx.config_context_sections.value
             for name in SECTIONS + ("legend",):
                 self.writers[name] = self.make_writer(name)
                 ctx.contextoutput(name, self.writers[name], True, "none", None, None)
@@ -262,21 +279,51 @@ class Agent:
             self.quiet("set context-reserve-lines never")
 
         ev = gdb.events
-        ev.stop.connect(self.on_stop)
-        ev.cont.connect(lambda e: self.send({"ev": "cont"}))
-        ev.exited.connect(self.on_exited)
-        ev.new_objfile.connect(lambda e: self.send({"ev": "objfile"}))
-        ev.breakpoint_created.connect(lambda b: self.send_breakpoints())
-        ev.breakpoint_modified.connect(lambda b: self.send_breakpoints())
+        self.listen(ev.stop, self.on_stop)
+        self.listen(ev.cont, lambda e: self.send({"ev": "cont"}))
+        self.listen(ev.exited, self.on_exited)
+        self.listen(ev.new_objfile, lambda e: self.send({"ev": "objfile"}))
+        self.listen(ev.breakpoint_created, lambda b: self.send_breakpoints())
+        self.listen(ev.breakpoint_modified, lambda b: self.send_breakpoints())
         # fired *before* gdb drops the breakpoint: leave it out explicitly
-        ev.breakpoint_deleted.connect(lambda b: self.send_breakpoints(exclude=b.number))
-        ev.memory_changed.connect(lambda e: self.send({"ev": "memory"}))
-        ev.register_changed.connect(lambda e: self.send({"ev": "memory"}))
-        ev.before_prompt.connect(self.on_prompt)
+        self.listen(ev.breakpoint_deleted, lambda b: self.send_breakpoints(exclude=b.number))
+        self.listen(ev.memory_changed, lambda e: self.send({"ev": "memory"}))
+        self.listen(ev.register_changed, lambda e: self.send({"ev": "memory"}))
+        self.listen(ev.before_prompt, self.on_prompt)
 
         threading.Thread(target=self.reader_loop, name="imgui-agent", daemon=True).start()
+        self.send_breakpoints()  # before hello: the GUI only restores saved ones into an empty session
         self.send({"ev": "hello", "info": self.op_info()})
-        self.send_breakpoints()
+        if self.attached:
+            self.send({"ev": "state", "state": self.op_state()})
+            self.refresh_context()
+
+    def listen(self, registry, callback) -> None:
+        registry.connect(callback)
+        self.handlers.append((registry, callback))
+
+    def detach(self) -> None:
+        """Undo everything start() did, so the gdb session goes on as before."""
+        if self.closed:
+            return
+        self.closed = True
+        for registry, callback in self.handlers:
+            try:
+                registry.disconnect(callback)
+            except Exception:
+                pass
+        self.handlers.clear()
+        if self.ctx is not None:
+            for name in self.writers:
+                self.ctx.resetcontextoutput(name)
+            if self.saved_sections is not None:
+                self.ctx.config_context_sections.value = self.saved_sections
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+        if self.attached:
+            print(f"[{APP_NAME}] GUI closed: the context is displayed in this terminal again.")
 
     # -- events -------------------------------------------------------------
     def on_stop(self, event) -> None:
@@ -289,6 +336,17 @@ class Agent:
             msg["reason"] = "signal"
             msg["signal"] = event.stop_signal
         self.send(msg)
+        if self.attached:
+            # Commands run from the GUI console resume the program asynchronously,
+            # and no prompt follows their stop (neither our state update nor
+            # pwndbg's context): publish both once gdb has finished stopping.
+            self.gdb.post_event(self.publish_stop)
+
+    def publish_stop(self) -> None:
+        if self.closed or not self.thread_stopped():
+            return
+        self.refresh_context()
+        self.send({"ev": "state", "state": self.op_state()})
 
     def on_exited(self, event) -> None:
         code = getattr(event, "exit_code", None)
@@ -400,6 +458,28 @@ class Agent:
             # ourselves (selected frame, registers, memory may have changed).
             self.send({"ev": "memory"})
             self.send({"ev": "state", "state": self.op_state()})
+        return out
+
+    def op_console(self, cmd: str) -> str:
+        """Run a command typed in the GUI console (attached mode: gdb's own
+        terminal belongs to the user). Execution commands block until the
+        program stops, exactly like at the gdb prompt."""
+        gdb = self.gdb
+        confirm = gdb.parameter("confirm")
+        self.quiet("set confirm off")  # a y/n query would wait on the user's terminal
+        try:
+            out = gdb.execute(cmd, from_tty=True, to_string=True) or ""
+        except KeyboardInterrupt:
+            out = "Quit\n"
+        except gdb.error as e:
+            out = f"\x1b[31m{e}\x1b[0m\n"
+        finally:
+            if confirm:
+                self.quiet("set confirm on")
+        # no prompt is displayed for these commands: publish what a prompt would
+        self.refresh_context()
+        self.send({"ev": "memory"})
+        self.send({"ev": "state", "state": self.op_state()})
         return out
 
     def op_complete(self, text: str) -> list:
@@ -679,4 +759,56 @@ class Agent:
 
 
 def main() -> None:
-    Agent().start()
+    """Entry point when the GUI launched gdb: the socket fd comes from the environment."""
+    fd = int(os.environ.pop(ENV_FD))
+    os.set_inheritable(fd, False)  # never leak the socket to the inferior
+    Agent(socket.socket(fileno=fd)).start()
+
+
+_active: list[Agent] = []
+_starting: list[bool] = []
+
+
+def attach(gui_args: str = "") -> None:
+    """Start the GUI from inside a running gdb session (the `init-pwndbg-ui` command).
+
+    `gui_args` (or $PWNDBG_IMGUI_ARGS) are extra GUI options, e.g. "--maximize".
+    $PWNDBG_IMGUI_CMD overrides the GUI command (default: `pwndbg-imgui`).
+    """
+    if _starting:
+        return  # re-entered while starting (e.g. through a command abbreviation)
+    if _active and not _active[0].closed:
+        print(f"[{APP_NAME}] the GUI is already running.")
+        return
+    _starting.append(True)
+    try:
+        _attach(gui_args)
+    finally:
+        _starting.clear()
+
+
+def _attach(gui_args: str) -> None:
+    import shlex
+    import subprocess
+
+    parent, child = socket.socketpair()
+    cmd = shlex.split(os.environ.get("PWNDBG_IMGUI_CMD", "pwndbg-imgui"))
+    cmd += ["--attach", str(child.fileno()), "--gdb-pid", str(os.getpid())]
+    cmd += shlex.split(gui_args or os.environ.get("PWNDBG_IMGUI_ARGS", ""))
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    os.makedirs(cache, exist_ok=True)
+    log_path = os.path.join(cache, f"{APP_NAME}.log")
+    try:
+        with open(log_path, "ab") as log:
+            subprocess.Popen(cmd, stdin=subprocess.DEVNULL, stdout=log, stderr=log,
+                             pass_fds=(child.fileno(),), start_new_session=True)
+    except OSError as e:
+        parent.close()
+        print(f"[{APP_NAME}] cannot start `{cmd[0]}` ({e}). Install it with: pipx install pwndbg-imgui")
+        return
+    finally:
+        child.close()
+    agent = Agent(parent, attached=True)
+    _active[:] = [agent]
+    agent.start()
+    print(f"[{APP_NAME}] GUI started (log: {log_path}). Closing it gives the context back to this terminal.")

@@ -23,6 +23,28 @@ class LaunchConfig:
         self.reset_layout = False
         self.no_viewports = False
         self.maximize = False
+        self.attach_fd: int | None = None  # attached mode: socket from the agent
+        self.gdb_pid: int | None = None
+
+
+GDBINIT_SNIPPET = """\
+define init-pwndbg-ui
+python
+import importlib.util as _u, subprocess as _sp
+try:
+    _p = _sp.run(["pwndbg-imgui", "--agent-path"], capture_output=True, text=True, check=True).stdout.strip()
+    _s = _u.spec_from_file_location("pwndbg_imgui_agent", _p)
+    _m = _u.module_from_spec(_s)
+    _s.loader.exec_module(_m)
+    _m.attach()
+except Exception as _e:
+    print(f"[pwndbg-imgui] cannot start the GUI: {_e}")
+end
+end
+document init-pwndbg-ui
+Load pwndbg (if needed) and open the pwndbg-imgui GUI attached to this gdb session.
+end
+"""
 
 
 def usage() -> str:
@@ -51,6 +73,11 @@ GUI options:
   --maximize          start with the main window maximized
   --reset-layout      start with the default window layout
   --list-themes       list themes and exit
+  --gdbinit           print an `init-pwndbg-ui` gdb command to add to your gdbinit:
+                        pwndbg-imgui --gdbinit >> ~/.config/gdb/gdbinit
+                      then, in any gdb session (e.g. pwntools' gdb.debug/attach
+                      gdbscript), `init-pwndbg-ui` opens the GUI attached to it
+  --agent-path        print the path of the gdb-side agent and exit
   -h, --help          show this help
 
 By default pwndbg is loaded from your gdbinit, else with a user-defined
@@ -61,7 +88,7 @@ Settings and layout live in {config_dir()}.
 
 def parse_args(argv: list[str]) -> LaunchConfig:
     cfg = LaunchConfig()
-    with_value = {"--gdb", "--pwndbg", "--init-cmd", "--theme", "--font", "--font-size"}
+    with_value = {"--gdb", "--pwndbg", "--init-cmd", "--theme", "--font", "--font-size", "--attach", "--gdb-pid"}
     i = 0
     rest: list[str] = []
     while i < len(argv):
@@ -96,6 +123,11 @@ def parse_args(argv: list[str]) -> LaunchConfig:
                 cfg.font = os.path.expanduser(val)
             elif key == "--font-size":
                 cfg.font_size = float(val)
+            elif key == "--attach":
+                cfg.attach_fd = int(val)
+                cfg.no_io = True  # the program's I/O belongs to whoever started it
+            elif key == "--gdb-pid":
+                cfg.gdb_pid = int(val)
         elif a in ("-h", "--help"):
             print(usage())
             sys.exit(0)
@@ -106,6 +138,14 @@ def parse_args(argv: list[str]) -> LaunchConfig:
             cfg.init = "none"
         elif a == "--no-io":
             cfg.no_io = True
+        elif a == "--agent-path":
+            from . import agent
+
+            print(os.path.realpath(agent.__file__))
+            sys.exit(0)
+        elif a == "--gdbinit":
+            print(GDBINIT_SNIPPET, end="")
+            sys.exit(0)
         elif a == "--maximize":
             cfg.maximize = True
         elif a == "--no-viewports":
