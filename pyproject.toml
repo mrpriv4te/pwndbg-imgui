@@ -1,5 +1,5 @@
 [build-system]
-requires = ["hatchling"]
+requires = ["hatchling", "hatch-vcs"]
 build-backend = "hatchling.build"
 
 [project]
@@ -20,8 +20,13 @@ classifiers = [
 [project.scripts]
 pwndbg-imgui = "pwndbg_imgui.cli:main"
 
+# Version is derived from git tags (e.g. `git tag v1.3.0`) by hatch-vcs.
 [tool.hatch.version]
-path = "src/pwndbg_imgui/__init__.py"
+source = "vcs"
+
+# Write the resolved version into the package so it is available at runtime.
+[tool.hatch.build.hooks.vcs]
+version-file = "src/pwndbg_imgui/_version.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/pwndbg_imgui"]
