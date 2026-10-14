@@ -406,6 +406,15 @@ class Agent:
     def op_ping(self) -> str:
         return "pong"
 
+    def target_is_remote(self) -> bool:
+        """True when the inferior runs through a remote target (gdbserver), so its
+        stdin/stdout don't go through gdb's inferior-tty (e.g. pwntools gdb.debug)."""
+        try:
+            conn = self.gdb.selected_inferior().connection
+            return conn is not None and conn.type in ("remote", "extended-remote")
+        except Exception:
+            return False
+
     def op_info(self) -> dict:
         gdb = self.gdb
         info = {
@@ -413,6 +422,7 @@ class Agent:
             "pwndbg": None,
             "file": gdb.current_progspace().filename,
             "sections": list(SECTIONS),
+            "remote": self.target_is_remote(),
         }
         if self.pwndbg is not None:
             info["pwndbg"] = getattr(self.pwndbg, "__version__", "loaded")
@@ -420,7 +430,7 @@ class Agent:
 
     def op_state(self) -> dict:
         gdb = self.gdb
-        st: dict = {"alive": False, "running": False, "pid": 0}
+        st: dict = {"alive": False, "running": False, "pid": 0, "remote": self.target_is_remote()}
         try:
             st["file"] = gdb.current_progspace().filename
             inf = gdb.selected_inferior()

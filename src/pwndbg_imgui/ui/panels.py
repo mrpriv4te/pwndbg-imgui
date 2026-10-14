@@ -165,12 +165,18 @@ class PanelsMixin:
     def io_gui(self) -> None:
         th = self.theme
         st = self.settings
-        if self.io is None:
+        if self.io is None or self.io_is_external():
+            imgui.push_text_wrap_pos(0)
             if self.attached:
                 imgui.text_disabled("This GUI is attached to an existing gdb session (init-pwndbg-ui): the program's "
                                     "input/output belong to whoever started it (e.g. your pwntools script).")
+            elif self.io is not None and self.state.get("remote"):
+                imgui.text_disabled("The target is remote (gdbserver): the program's input/output go through the "
+                                    "remote side, not this window. This is the case with pwntools' gdb.debug — "
+                                    "interact with the program in the script that launched it.")
             else:
                 imgui.text_disabled("Program I/O is disabled (--no-io): the program shares the gdb console.")
+            imgui.pop_text_wrap_pos()
             return
         # header
         imgui.set_next_item_width(combo_width("Python expr"))

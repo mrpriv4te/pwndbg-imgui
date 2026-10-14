@@ -163,6 +163,10 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
     def is_running(self) -> bool:
         return self.is_alive() and bool(self.state.get("running"))
 
+    def io_is_external(self) -> bool:
+        """The program's I/O does not flow through our PTY (remote/gdbserver target)."""
+        return bool(self.state.get("remote") or self.info.get("remote"))
+
     def toast(self, text: str, kind: str = "info", ttl: float = 3.5, actions: list | None = None,
               key: str | None = None) -> None:
         if key is not None and any(t.get("key") == key for t in self.toasts):
