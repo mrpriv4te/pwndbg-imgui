@@ -168,7 +168,7 @@ class PanelsMixin:
         if self.io is None or self.io_is_external():
             imgui.push_text_wrap_pos(0)
             if self.attached:
-                imgui.text_disabled("This GUI is attached to an existing gdb session (init-pwndbg-ui): the program's "
+                imgui.text_disabled("This GUI is attached to an existing gdb session (init-pwndbg-imgui): the program's "
                                     "input/output belong to whoever started it (e.g. your pwntools script).")
             elif self.io is not None and self.state.get("remote"):
                 imgui.text_disabled("The target is remote (gdbserver): the program's input/output go through the "

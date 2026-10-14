@@ -61,7 +61,7 @@ class Agent:
     """Bridge between gdb/pwndbg and the GUI.
 
     `attached` is False when the GUI launched gdb (the GUI owns gdb's terminal) and
-    True when the GUI was started from an existing gdb session (`init-pwndbg-ui`):
+    True when the GUI was started from an existing gdb session (`init-pwndbg-imgui`):
     the user's terminal is left alone and the GUI console goes through `op_console`.
     """
 
@@ -145,7 +145,7 @@ class Agent:
             candidates.append(("cmd", spec[len("cmd:"):]))
         else:
             # exact name only: gdb would happily run `init-pwndbg` as an abbreviation
-            # of another command (like `init-pwndbg-ui`, which would recurse)
+            # of another command (like `init-pwndbg-imgui`, which would recurse)
             user_cmds = {line.split(" -- ")[0].strip() for line in self.quiet("help user-defined").splitlines()}
             if "init-pwndbg" in user_cmds:
                 candidates.append(("cmd", "init-pwndbg"))
@@ -780,7 +780,7 @@ _starting: list[bool] = []
 
 
 def attach(gui_args: str = "") -> None:
-    """Start the GUI from inside a running gdb session (the `init-pwndbg-ui` command).
+    """Start the GUI from inside a running gdb session (the `init-pwndbg-imgui` command).
 
     `gui_args` (or $PWNDBG_IMGUI_ARGS) are extra GUI options, e.g. "--maximize".
     $PWNDBG_IMGUI_CMD overrides the GUI command (default: `pwndbg-imgui`).

@@ -39,10 +39,10 @@ Options de l'interface : `--gdb PATH`, `--pwndbg PATH`, `--init-cmd CMD`, `--no-
 `--theme NAME`, `--font PATH`, `--font-size N`, `--no-io`, `--no-viewports`, `--maximize`,
 `--reset-layout`, `--list-themes` (voir `--help`).
 
-### S'attacher à une session gdb existante (`init-pwndbg-ui`)
+### S'attacher à une session gdb existante (`init-pwndbg-imgui`)
 
 Pour ouvrir l'interface depuis un gdb déjà lancé (utile avec `gdb.debug`/`gdb.attach` de
-pwntools), ajoute une fois la commande `init-pwndbg-ui` à ton gdbinit :
+pwntools), ajoute une fois la commande `init-pwndbg-imgui` à ton gdbinit :
 
 ```bash
 pwndbg-imgui --gdbinit >> ~/.config/gdb/gdbinit
@@ -51,14 +51,14 @@ pwndbg-imgui --gdbinit >> ~/.config/gdb/gdbinit
 Ensuite, dans n'importe quelle session gdb :
 
 ```
-(gdb) init-pwndbg-ui        # charge pwndbg si besoin puis ouvre l'interface, attachée à ce gdb
+(gdb) init-pwndbg-imgui        # charge pwndbg si besoin puis ouvre l'interface, attachée à ce gdb
 ```
 
 gdb reste dans son terminal (c'est là que vivent le programme et sa saisie) ; l'interface
 affiche le contexte et pilote gdb. Fermer l'interface rend le contexte au terminal.
 `$PWNDBG_IMGUI_ARGS` passe des options (ex. `export PWNDBG_IMGUI_ARGS=--maximize`).
 
-Dans un script pwntools, il suffit d'ajouter `init-pwndbg-ui` au `gdbscript` (ou
+Dans un script pwntools, il suffit d'ajouter `init-pwndbg-imgui` au `gdbscript` (ou
 d'utiliser `context.gdb_binary = "pwndbg-imgui"`). Un template prêt à l'emploi avec
 l'option `-d ui` est généré par :
 
@@ -109,7 +109,7 @@ Deux modes, mais le même agent côté gdb :
 
 - **Lancé par l'interface** (`pwndbg-imgui ./chall`) : l'interface crée un PTY pour la
   console gdb et un pour le programme, puis démarre gdb en lui faisant charger `agent.py`.
-- **Attaché** (`init-pwndbg-ui` dans un gdb existant) : gdb garde son terminal ; `agent.attach()`
+- **Attaché** (`init-pwndbg-imgui` dans un gdb existant) : gdb garde son terminal ; `agent.attach()`
   lance l'interface et lui passe un `socketpair`. Fermer l'interface rend le contexte au
   terminal (l'agent se désenregistre proprement).
 

@@ -28,7 +28,7 @@ class LaunchConfig:
 
 
 GDBINIT_SNIPPET = """\
-define init-pwndbg-ui
+define init-pwndbg-imgui
 python
 import importlib.util as _u, subprocess as _sp
 try:
@@ -41,7 +41,7 @@ except Exception as _e:
     print(f"[pwndbg-imgui] cannot start the GUI: {_e}")
 end
 end
-document init-pwndbg-ui
+document init-pwndbg-imgui
 Load pwndbg (if needed) and open the pwndbg-imgui GUI attached to this gdb session.
 end
 """
@@ -80,10 +80,10 @@ GUI options:
   --maximize          start with the main window maximized
   --reset-layout      start with the default window layout
   --list-themes       list themes and exit
-  --gdbinit           print an `init-pwndbg-ui` gdb command to add to your gdbinit:
+  --gdbinit           print an `init-pwndbg-imgui` gdb command to add to your gdbinit:
                         pwndbg-imgui --gdbinit >> ~/.config/gdb/gdbinit
                       then, in any gdb session (e.g. pwntools' gdb.debug/attach
-                      gdbscript), `init-pwndbg-ui` opens the GUI attached to it
+                      gdbscript), `init-pwndbg-imgui` opens the GUI attached to it
   --agent-path        print the path of the gdb-side agent and exit
   --exploit [PATH]    write a pwntools exploit template (./exploit.py, or PATH)
                       with the pwndbg-imgui `-d ui` integration; prints to stdout

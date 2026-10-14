@@ -54,7 +54,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.fonts = find_mono_fonts()
 
         self.console_term = Term(max_lines=20000)
-        # attached mode (`init-pwndbg-ui`): gdb runs in the user's terminal, we don't own it
+        # attached mode (`init-pwndbg-imgui`): gdb runs in the user's terminal, we don't own it
         self.attached = cfg.attach_fd is not None
         self.console = None if self.attached else Pty(self.console_term)
         self.last_console_cmd = ""
