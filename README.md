@@ -53,6 +53,23 @@ The `pwndbg-imgui` command is then available (`python -m pwndbg_imgui` works too
 > `~/pwndbg`, `/usr/share/pwndbg`… (or explicitly: `--pwndbg ~/path/pwndbg`,
 > `--init-cmd init-pwndbg`).
 
+### Check pwndbg
+
+Make sure gdb can load pwndbg:
+
+```bash
+# if your gdbinit loads pwndbg automatically:
+gdb -q -batch -ex 'version'
+
+# if you load it manually (a user-defined `init-pwndbg` command):
+gdb -q -batch -ex 'init-pwndbg' -ex 'version'
+```
+
+Either should print a line like `Pwndbg: 2026.07.29 …`. If instead you get
+`Undefined command: "version"`, pwndbg isn't being loaded — install it (see
+[pwndbg.re](https://pwndbg.re)) or point pwndbg-imgui at it with `--pwndbg PATH`
+/ `--init-cmd init-pwndbg`.
+
 ---
 
 ## 🚀 Usage
