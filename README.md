@@ -185,6 +185,34 @@ pwndbg-imgui --exploit > e.py     # or to another file
 
 ---
 
+## ⚙️ Configuration
+
+Settings and layout live in **`~/.config/pwndbg-imgui/`** (honors `$XDG_CONFIG_HOME`):
+
+| File | What it holds |
+|---|---|
+| `settings.json` | preferences and remembered state (plain JSON) |
+| `layout.ini` | window layout and geometry, managed by the docking system |
+
+Almost everything is set through the GUI — the **Settings** menu, the **Preferences**
+window, and the **pwndbg Config** pane — so you rarely edit the file by hand. What
+`settings.json` keeps:
+
+- **Appearance** — `theme`, `ui_size`, `code_size`, `font`, `custom_titlebar`, `viewports`,
+  `fps_idle`.
+- **Behavior** — `autofit`, `remember_bps`, `persist_pwndbg_config`, `decomp_autoconnect`,
+  `io_raw` / `io_echo` / `io_newline`.
+- **Remembered state** — `console_history` and `io_history`, `views` (open command views),
+  `pwndbg_config` (pwndbg parameters you changed, re-applied each run), and `binaries`
+  (per-binary breakpoints and run arguments).
+
+To reset: delete the file (or the whole directory) to restore defaults, or pass
+`--reset-layout` to rebuild just the default window layout. Breakpoints are offered for
+restore per binary (toggle with `remember_bps`), and changed pwndbg parameters are
+re-applied each run (toggle in the Config pane or with `persist_pwndbg_config`).
+
+---
+
 ## 🛠️ How it works
 
 Two modes, one agent on the gdb side:
