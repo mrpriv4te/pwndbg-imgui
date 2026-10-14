@@ -1,31 +1,62 @@
-# pwndbg-imgui
+<div align="center">
 
-Interface Dear ImGui (via [imgui_bundle](https://github.com/pthom/imgui_bundle)) pour
-[pwndbg](https://pwndbg.re), façon Ghidra/IDA : toutes les sections du contexte dans des
-fenêtres dockables, plus des outils qui exploitent pwndbg directement.
+# 🐞 pwndbg-imgui
 
-## Installation
+**A dockable graphical front-end for [pwndbg](https://pwndbg.re), Ghidra / IDA style.**
 
-Avec [pipx](https://pipx.pypa.io), dans son propre environnement (imgui-bundle inclus) :
+Every context section in its own movable window, plus tools that drive pwndbg directly —
+all while keeping the gdb console one keystroke away.
+
+![powered by pwndbg](https://img.shields.io/badge/powered%20by-pwndbg-f0565a?style=flat-square)
+![Dear ImGui](https://img.shields.io/badge/UI-Dear%20ImGui-5fa8f5?style=flat-square)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?style=flat-square&logo=python&logoColor=white)
+![Linux](https://img.shields.io/badge/Linux-x86--64-444?style=flat-square&logo=linux&logoColor=white)
+![themes](https://img.shields.io/badge/themes-13-c67bf0?style=flat-square)
+
+![Overview](docs/screenshots/overview.png)
+
+</div>
+
+---
+
+## ✨ At a glance
+
+| | |
+|---|---|
+| 🧩 **Dockable context** | Registers, Disassembly, Source, Stack, Backtrace, Watch… rearrange freely |
+| 🖱️ **Everything is clickable** | hover → region + deref chain, Ctrl+click → memory, right-click → actions |
+| 🧠 **Decompiler** | Ghidra / IDA / Binary Ninja via decomp2dbg, whole function following `$pc` |
+| 🔬 **Editable memory** | region-colored hexdump, diff on every stop, in-place editing |
+| ⌨️ **Program I/O** | a terminal just for the target, pwntools-style payloads (`p64`, `cyclic`, `flat`) |
+| 🎨 **13 themes** | dark & light, contrast auto-corrected, themed title bar |
+| 🪄 **Palette** | <kbd>Ctrl</kbd>+<kbd>P</kbd> for everything: commands, windows, themes, views |
+| 🐍 **pwntools** | attaches to `gdb.debug` / `gdb.attach`, ships an `exploit.py` template |
+
+---
+
+## 📦 Installation
+
+With [pipx](https://pipx.pypa.io), in its own environment (imgui-bundle included):
 
 ```bash
-pipx install .                 # depuis ce dossier
-pipx install -e .              # pour développer : les modifications du code sont prises en compte
-pipx upgrade pwndbg-imgui      # après un `git pull` (sans -e : `pipx install --force .`)
+pipx install .                 # from this folder
+pipx install -e .              # for development: code changes are picked up live
+pipx upgrade pwndbg-imgui      # after a `git pull` (without -e: `pipx install --force .`)
 ```
 
-La commande `pwndbg-imgui` est alors disponible (`python -m pwndbg_imgui` fonctionne aussi).
+The `pwndbg-imgui` command is then available (`python -m pwndbg_imgui` works too).
 
-pwndbg doit être installé. Il est chargé, dans l'ordre :
-1. par ton `gdbinit` s'il le fait déjà,
-2. sinon via une commande utilisateur `init-pwndbg` si elle existe,
-3. sinon depuis `$PWNDBG_PATH`, `~/.local/share/pwndbg`, `~/pwndbg`, `/usr/share/pwndbg`…
+> [!NOTE]
+> pwndbg must be installed. It is loaded, in order: from your `gdbinit` if it already does
+> so → a user-defined `init-pwndbg` command → `$PWNDBG_PATH`, `~/.local/share/pwndbg`,
+> `~/pwndbg`, `/usr/share/pwndbg`… (or explicitly: `--pwndbg ~/path/pwndbg`,
+> `--init-cmd init-pwndbg`).
 
-(ou explicitement : `--pwndbg ~/chemin/pwndbg`, `--init-cmd init-pwndbg`).
+---
 
-## Utilisation
+## 🚀 Usage
 
-Comme `pwndbg` / `gdb` : tout ce qui n'est pas une option de l'interface est passé à gdb.
+Like `pwndbg` / `gdb`: anything that is not a GUI option is passed straight to gdb.
 
 ```bash
 pwndbg-imgui ./chall
@@ -35,108 +66,152 @@ pwndbg-imgui ./chall core
 pwndbg-imgui -ex 'target remote :1234' ./chall
 ```
 
-Options de l'interface : `--gdb PATH`, `--pwndbg PATH`, `--init-cmd CMD`, `--no-pwndbg`,
+GUI options: `--gdb PATH`, `--pwndbg PATH`, `--init-cmd CMD`, `--no-pwndbg`,
 `--theme NAME`, `--font PATH`, `--font-size N`, `--no-io`, `--no-viewports`, `--maximize`,
-`--reset-layout`, `--list-themes` (voir `--help`).
+`--reset-layout`, `--list-themes` (see `--help`).
 
-### S'attacher à une session gdb existante (`init-pwndbg-imgui`)
+### 🔗 Attach to an existing gdb session
 
-Pour ouvrir l'interface depuis un gdb déjà lancé (utile avec `gdb.debug`/`gdb.attach` de
-pwntools), ajoute une fois la commande `init-pwndbg-imgui` à ton gdbinit :
+To open the GUI from an already-running gdb (e.g. pwntools' `gdb.debug` / `gdb.attach`),
+add the `init-pwndbg-imgui` command to your gdbinit once:
 
 ```bash
 pwndbg-imgui --gdbinit >> ~/.config/gdb/gdbinit
 ```
 
-Ensuite, dans n'importe quelle session gdb :
+Then, in any gdb session:
 
+```text
+(gdb) init-pwndbg-imgui        # loads pwndbg if needed and opens the GUI, attached to this gdb
 ```
-(gdb) init-pwndbg-imgui        # charge pwndbg si besoin puis ouvre l'interface, attachée à ce gdb
-```
 
-gdb reste dans son terminal (c'est là que vivent le programme et sa saisie) ; l'interface
-affiche le contexte et pilote gdb. Fermer l'interface rend le contexte au terminal.
-`$PWNDBG_IMGUI_ARGS` passe des options (ex. `export PWNDBG_IMGUI_ARGS=--maximize`).
+gdb keeps its terminal (that's where the program and its input live); the GUI shows the
+context and drives gdb. Closing the GUI hands the context back to the terminal.
+`$PWNDBG_IMGUI_ARGS` passes options (e.g. `export PWNDBG_IMGUI_ARGS=--maximize`).
 
-Dans un script pwntools, il suffit d'ajouter `init-pwndbg-imgui` au `gdbscript` (ou
-d'utiliser `context.gdb_binary = "pwndbg-imgui"`). Un template prêt à l'emploi avec
-l'option `-d ui` est généré par :
+### 🐍 With pwntools
+
+In a script, add `init-pwndbg-imgui` to the `gdbscript`, or set
+`context.gdb_binary = "pwndbg-imgui"`. A ready-to-use template (with a `-d ui` option) is
+generated by:
 
 ```bash
-pwndbg-imgui --exploit            # crée ./exploit.py
-pwndbg-imgui --exploit > e.py     # ou vers un autre fichier
+pwndbg-imgui --exploit            # creates ./exploit.py
+pwndbg-imgui --exploit > e.py     # or to another file
 ```
 
-## Fonctionnalités
-
-- **Contexte pwndbg** : Registers, Disassembly, Source, Stack, Backtrace, Arguments, Watch,
-  Threads, Heap Tracker, Last Signal. Chaque section s'adapte à la taille de sa fenêtre
-  (disasm/stack/source/backtrace affichent exactement le nombre de lignes visibles) et
-  seules les sections affichées sont calculées.
-- **Adresses cliquables partout** : survol = région mémoire + chaîne de déréférencement
-  pwndbg ; Ctrl+clic = ouvrir dans la vue mémoire ; clic droit = telescope, désassembler,
-  xinfo, chercher les pointeurs, breakpoint, watchpoint…
-- **Breakpoints** : clic dans la marge de Disassembly/Source, fenêtre dédiée (activer,
-  conditions, compteurs de hits, watchpoints), mémorisés par binaire.
-- **Console gdb** : couleurs, historique persistant, complétion Tab (via gdb), Entrée vide
-  = répéter la dernière commande, Ctrl+C = interrompre.
-- **Program I/O** : le programme débogué a son propre terminal (stdin/stdout séparés de
-  gdb), en mode brut (binary-safe). Envoi en texte, hex ou expression Python façon
-  pwntools (`b"A"*40 + p64(0x401136)`, `flat(...)`, `cyclic(100)`), octets non
-  imprimables affichés en `\xNN`, vue hexdump de la sortie.
-- **Mémoire** : hexdump/qwords colorés par région (légende pwndbg), octets modifiés depuis
-  le dernier arrêt surlignés, édition en place (tape des chiffres hexa), suivi automatique
-  d'une expression (`$sp`, `$rdi`…), inspecteur de valeurs.
-- **VMMap**, **navigateur de commandes pwndbg** (aide intégrée), **éditeur de la config
-  pwndbg**, **vues de commandes** live (n'importe quelle commande, rafraîchie à chaque
-  arrêt : `heap`, `bins`, `vis_heap_chunks`, `got`, `telescope`…), **pattern cyclic**
-  (générer, envoyer au programme, retrouver un offset depuis `$pc`/`$sp`).
-- **Palette de commandes** (Ctrl+P), barre d'outils (Run/Start/Continue/Pause/Step…),
-  barre d'état (pid, arch, checksec, légende), notifications (breakpoint, signal, exit).
-- **Barre de titre intégrée** au thème (glisser pour déplacer, double-clic pour maximiser ;
-  désactivable dans Preferences pour retrouver celle du système).
-- **13 thèmes** (sombres et clairs, contraste corrigé automatiquement), zoom du code
-  (Ctrl+molette), polices système, layout et réglages persistants
-  (`~/.config/pwndbg-imgui/`).
-
-Raccourcis : F5 continue/run · F6 pause · F7/F8 si/ni · Shift+F7/F8 step/next ·
-Ctrl+F7 finish · Shift+F5 kill · Ctrl+P palette · Ctrl+G aller à une adresse ·
-Ctrl+F rechercher (menu Help → Keyboard shortcuts pour la liste complète).
-
-## Fonctionnement
-
-Deux modes, mais le même agent côté gdb :
-
-- **Lancé par l'interface** (`pwndbg-imgui ./chall`) : l'interface crée un PTY pour la
-  console gdb et un pour le programme, puis démarre gdb en lui faisant charger `agent.py`.
-- **Attaché** (`init-pwndbg-imgui` dans un gdb existant) : gdb garde son terminal ; `agent.attach()`
-  lance l'interface et lui passe un `socketpair`. Fermer l'interface rend le contexte au
-  terminal (l'agent se désenregistre proprement).
-
-Dans les deux cas gdb charge `agent.py` **par son chemin** : gdb utilise son propre Python
-(celui de pwndbg), qui ne doit pas voir l'environnement pipx. L'agent (bibliothèque standard
-uniquement) redirige chaque section du contexte vers l'interface (`contextoutput` avec un
-callable) et répond à des requêtes JSON (mémoire, vmmap, breakpoints, complétion,
-décompilation, console…) sur le `socketpair`.
-
+```bash
+./exploit.py            # local
+./exploit.py -d         # debug: gdb in a new terminal
+./exploit.py -d ui      # debug: the pwndbg-imgui GUI
+./exploit.py -r --host HOST --port PORT
 ```
+
+---
+
+## 🖼️ Gallery
+
+| Memory view | Command palette |
+|:---:|:---:|
+| ![Memory](docs/screenshots/memory.png) | ![Palette](docs/screenshots/palette.png) |
+
+---
+
+## 🎛️ Features
+
+- **🧩 pwndbg context** — Registers, Disassembly, Source, Stack, Backtrace, Arguments, Watch,
+  Threads, Heap Tracker, Last Signal. Each section fits its window (disasm/stack/source/
+  backtrace show exactly as many lines as are visible) and only the shown sections are
+  computed.
+- **🖱️ Clickable addresses everywhere** — hover = memory region + pwndbg deref chain;
+  <kbd>Ctrl</kbd>+click = open in the memory view; right-click = telescope, disassemble,
+  xinfo, find pointers, breakpoint, watchpoint…
+- **🧠 Decompiler** — whole-function view via the decomp2dbg integration
+  (Ghidra / IDA / Binary Ninja / angr), syntax highlighting, follows `$pc`, auto
+  connect/sync.
+- **🔴 Breakpoints** — click the Disassembly/Source gutter, a dedicated window (enable,
+  conditions, hit counts, watchpoints), offered for restore per binary.
+- **💻 gdb console** — colors, persistent history, <kbd>Tab</kbd> completion (via gdb),
+  empty Enter repeats the last command, <kbd>Ctrl</kbd>+<kbd>C</kbd> interrupts.
+- **⌨️ Program I/O** — the program gets its own terminal (stdin/stdout separate from gdb),
+  raw mode (binary-safe). Send as text, hex, or a pwntools-style Python expression
+  (`b"A"*40 + p64(0x401136)`, `flat(...)`, `cyclic(100)`), non-printables shown as `\xNN`,
+  plus a hexdump view of the output.
+- **🔬 Memory** — region-colored hexdump/qwords (pwndbg legend), bytes changed since the last
+  stop highlighted, in-place editing (type hex digits), follow an expression (`$sp`,
+  `$rdi`…), value inspector.
+- **🧰 Tools** — **VMMap**, a **command browser** (built-in help), a **pwndbg config editor**
+  (remembered across runs), **live command views** refreshed on every stop (`heap`, `bins`,
+  `vis_heap_chunks`, `got`, `telescope`…), a **cyclic pattern tool** (generate, send, find an
+  offset from `$pc`/`$sp`).
+- **🪄 Comfort** — command palette (<kbd>Ctrl</kbd>+<kbd>P</kbd>), toolbar
+  (Run/Start/Continue/Pause/Step…), status bar (pid, arch, checksec, legend), notifications
+  (breakpoint, signal, exit).
+- **🎨 Appearance** — 13 themes (dark and light, contrast auto-corrected), a themed title bar
+  (drag to move, double-click to maximize), code zoom (<kbd>Ctrl</kbd>+wheel), system fonts,
+  persistent layout and settings (`~/.config/pwndbg-imgui/`).
+
+---
+
+## ⌨️ Shortcuts
+
+| Key | Action | | Key | Action |
+|---|---|---|---|---|
+| <kbd>F5</kbd> | Continue / Run | | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Palette |
+| <kbd>F6</kbd> | Pause | | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to address |
+| <kbd>F7</kbd> / <kbd>F8</kbd> | Step / Next (instruction) | | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Find |
+| <kbd>⇧</kbd>+<kbd>F7</kbd> / <kbd>F8</kbd> | Step / Next (source) | | <kbd>Ctrl</kbd>+wheel | Zoom code |
+| <kbd>Ctrl</kbd>+<kbd>F7</kbd> | Finish | | <kbd>⇧</kbd>+<kbd>F5</kbd> | Kill |
+
+<sub>Full list: <strong>Help → Keyboard shortcuts</strong> menu.</sub>
+
+---
+
+## 🛠️ How it works
+
+Two modes, one agent on the gdb side:
+
+- **Launched by the GUI** (`pwndbg-imgui ./chall`) — the GUI creates one PTY for the gdb
+  console and one for the program, then starts gdb and has it load `agent.py`.
+- **Attached** (`init-pwndbg-imgui`) — gdb keeps its terminal; `agent.attach()` launches the
+  GUI and hands it a `socketpair`. Closing the GUI gives the context back to the terminal.
+
+In both cases gdb loads `agent.py` **by its path**: gdb uses its own Python (pwndbg's), which
+must not see the pipx environment. The agent (standard library only) routes each context
+section to the GUI (`contextoutput` with a callable) and answers JSON requests (memory,
+vmmap, breakpoints, completion, decompilation, console…) over the `socketpair`.
+
+<details>
+<summary>Project layout</summary>
+
+```text
 src/pwndbg_imgui/
-├── cli.py            point d'entrée, options (n'importe l'interface qu'au lancement)
-├── agent.py          côté gdb (stdlib uniquement)
-├── transport.py      client RPC + PTYs
-├── term.py           mini émulateur de terminal (ANSI)
-├── theme.py          couleurs et thèmes
-├── settings.py       réglages persistants
-├── fonts.py          recherche des polices (fontconfig)
-├── payload.py        cyclic, expressions de payload, hexdump
+├── cli.py            entry point, options (imports the GUI only at launch)
+├── agent.py          gdb side (standard library only)
+├── transport.py      RPC client + PTYs
+├── term.py           small terminal emulator (ANSI)
+├── theme.py          colors and themes
+├── settings.py       persistent settings
+├── fonts.py          font discovery (fontconfig)
+├── payload.py        cyclic, payload expressions, hexdump
+├── templates/        exploit.py template (--exploit)
 └── ui/
-    ├── app.py        état, process gdb, événements, runner hello_imgui
-    ├── chrome.py     menus, barre d'outils/titre/état, palette, dialogues
-    ├── panels.py     fenêtres outils (console, I/O, vmmap, breakpoints…)
-    ├── sections.py   comportement des sections du contexte
-    ├── views.py      vues mémoire, décompilateur, commandes
-    ├── widgets.py    TextView et helpers
-    ├── appearance.py polices et application du thème
-    ├── native.py     contrôle de la fenêtre GLFW (barre de titre)
-    └── catalog.py    sections et presets d'outils
+    ├── app.py        state, gdb process, events, hello_imgui runner
+    ├── chrome.py     menus, toolbar/title/status bar, palette, dialogs
+    ├── panels.py     tool windows (console, I/O, vmmap, breakpoints…)
+    ├── sections.py   per-context-section behavior
+    ├── views.py      memory, decompiler and command views
+    ├── widgets.py    TextView and helpers
+    ├── appearance.py fonts and theme application
+    ├── native.py     GLFW window control (title bar)
+    └── catalog.py    sections and tool presets
 ```
+
+</details>
+
+---
+
+<div align="center">
+<sub>Built with <a href="https://pwndbg.re">pwndbg</a> and
+<a href="https://github.com/pthom/imgui_bundle">imgui_bundle</a>.</sub>
+</div>
