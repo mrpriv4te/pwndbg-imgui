@@ -47,6 +47,13 @@ end
 """
 
 
+def exploit_template() -> str:
+    """The pwntools exploit template shipped as package data."""
+    import importlib.resources as ir
+
+    return (ir.files("pwndbg_imgui") / "templates" / "exploit.tmpl").read_text()
+
+
 def usage() -> str:
     return f"""\
 usage: {APP_NAME} [GUI options] [gdb arguments...]
@@ -78,6 +85,9 @@ GUI options:
                       then, in any gdb session (e.g. pwntools' gdb.debug/attach
                       gdbscript), `init-pwndbg-ui` opens the GUI attached to it
   --agent-path        print the path of the gdb-side agent and exit
+  --exploit [PATH]    write a pwntools exploit template (./exploit.py, or PATH)
+                      with the pwndbg-imgui `-d ui` integration; prints to stdout
+                      when piped (pwndbg-imgui --exploit > exploit.py)
   -h, --help          show this help
 
 By default pwndbg is loaded from your gdbinit, else with a user-defined
@@ -145,6 +155,22 @@ def parse_args(argv: list[str]) -> LaunchConfig:
             sys.exit(0)
         elif a == "--gdbinit":
             print(GDBINIT_SNIPPET, end="")
+            sys.exit(0)
+        elif a == "--exploit":
+            # write ./exploit.py when run on a terminal, else print (for piping)
+            text = exploit_template()
+            target = argv[i + 1] if i + 1 < len(argv) and not argv[i + 1].startswith("-") else None
+            if target is None and not sys.stdout.isatty():
+                sys.stdout.write(text)
+                sys.exit(0)
+            path = target or "exploit.py"
+            if os.path.exists(path):
+                sys.exit(f"{APP_NAME}: {path} already exists (refusing to overwrite); "
+                         f"redirect instead: {APP_NAME} --exploit > other.py")
+            with open(path, "w") as f:
+                f.write(text)
+            os.chmod(path, 0o755)
+            print(f"wrote {path}")
             sys.exit(0)
         elif a == "--maximize":
             cfg.maximize = True

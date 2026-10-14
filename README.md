@@ -58,8 +58,14 @@ gdb reste dans son terminal (c'est là que vivent le programme et sa saisie) ; l
 affiche le contexte et pilote gdb. Fermer l'interface rend le contexte au terminal.
 `$PWNDBG_IMGUI_ARGS` passe des options (ex. `export PWNDBG_IMGUI_ARGS=--maximize`).
 
-Dans un script pwntools, il suffit d'ajouter `init-pwndbg-ui` au `gdbscript` (cf.
-`exploit.py` : `./exploit.py -d ui`).
+Dans un script pwntools, il suffit d'ajouter `init-pwndbg-ui` au `gdbscript` (ou
+d'utiliser `context.gdb_binary = "pwndbg-imgui"`). Un template prêt à l'emploi avec
+l'option `-d ui` est généré par :
+
+```bash
+pwndbg-imgui --exploit            # crée ./exploit.py
+pwndbg-imgui --exploit > e.py     # ou vers un autre fichier
+```
 
 ## Fonctionnalités
 
