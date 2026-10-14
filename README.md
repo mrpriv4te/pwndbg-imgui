@@ -12,6 +12,7 @@ all while keeping the gdb console one keystroke away.
 ![Python](https://img.shields.io/badge/Python-3.10%2B-3776ab?style=flat-square&logo=python&logoColor=white)
 ![Linux](https://img.shields.io/badge/Linux-x86--64-444?style=flat-square&logo=linux&logoColor=white)
 ![themes](https://img.shields.io/badge/themes-13-c67bf0?style=flat-square)
+![license](https://img.shields.io/badge/license-MIT-8fd16a?style=flat-square)
 
 ![Overview](docs/screenshots/overview.png)
 

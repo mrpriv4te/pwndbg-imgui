@@ -7,6 +7,8 @@ name = "pwndbg-imgui"
 dynamic = ["version"]
 description = "A dockable Dear ImGui front-end for pwndbg"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.10"
 dependencies = ["imgui-bundle>=1.92"]
 keywords = ["pwndbg", "gdb", "debugger", "imgui", "reverse-engineering", "exploitation"]
