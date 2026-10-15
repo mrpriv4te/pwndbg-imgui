@@ -295,7 +295,9 @@ src/pwndbg_imgui/
 └── ui/
     ├── app.py        state, gdb process, events, hello_imgui runner
     ├── chrome.py     menus, toolbar/title/status bar, palette, dialogs
-    ├── panels.py     tool windows (console, I/O, commands, config…)
+    ├── panels.py     section windows, preferences, tool window list
+    ├── console_panes.py  console and program I/O
+    ├── tool_panes.py     commands, pwndbg config, cyclic
     ├── panes.py      standalone panes (vmmap, breakpoints, heap, backtrace, threads)
     ├── sections.py   per-context-section behavior
     ├── views.py      memory, decompiler and command views

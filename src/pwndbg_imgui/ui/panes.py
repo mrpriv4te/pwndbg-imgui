@@ -687,8 +687,8 @@ class RegistersBar:
 
         def applied(_out) -> None:
             self.fetch()
-            if app.config is not None:  # keep the Config pane's markers in step
-                app.reload_config()
+            if app.config_pane.params is not None:  # keep the Config pane's markers in step
+                app.config_pane.reload()
 
         app.exec(f"set {name} {arg}", quiet=True, cb=applied)  # refreshes the context
 

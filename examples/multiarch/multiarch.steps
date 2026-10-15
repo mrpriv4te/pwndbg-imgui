@@ -7,7 +7,7 @@
 8   py    app._check = {}; app.rpc.request("eval", lambda v: app._check.update(gdb=v), expr="*(unsigned long *)$sp")
 9   py    m = app.memory; mine = m.read_int(m.sel, app.ptrsize); assert mine == app._check["gdb"], (mine, app._check)  # Memory view == gdb
 9.2 py    from pwndbg_imgui.payload import eval_payload; assert eval_payload("flat(0x41424344)", word=app.ptrsize, endian=app.endian) == (0x41424344).to_bytes(app.ptrsize, app.endian)
-9.4 py    from pwndbg_imgui.payload import cyclic; v = int.from_bytes(cyclic(64, app.cyclic_size())[24:24 + app.ptrsize], app.endian); app._cyclic_lookup(v); assert "offset 24 " in app.cyclic_result, app.cyclic_result
+9.4 py    from pwndbg_imgui.payload import cyclic; v = int.from_bytes(cyclic(64, app.cyclic_pane.size())[24:24 + app.ptrsize], app.endian); app.cyclic_pane.lookup(v); assert "offset 24 " in app.cyclic_pane.result, app.cyclic_pane.result
 9.6 py    [setattr(d, "focus_window_at_next_frame", True) for d in hello_imgui.get_runner_params().docking_params.dockable_windows if d.label.endswith(" Memory")]
 10  shot  multiarch
 10.5 quit

@@ -9,6 +9,7 @@ import re
 import socket
 import sys
 import time
+from typing import Literal
 
 from imgui_bundle import ImVec2, hello_imgui, imgui
 from imgui_bundle import icons_fontawesome_6 as fa
@@ -25,6 +26,7 @@ from .chrome import ChromeMixin
 from .native import NativeWindow, capsule_pointer
 from .console_panes import ConsolePane, ProgramIOPane
 from .panels import PanelsMixin
+from .tool_panes import CommandsPane, ConfigPane, CyclicPane
 from .panes import BacktracePane, BreakpointsPane, HeapPane, RegistersBar, ThreadsPane, VmmapPane
 from .sections import SectionsMixin
 from .views import CmdView, DecompView, MemoryView
@@ -85,8 +87,6 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.addr_pending: set[int] = set()
         self.inline_cache: dict[str, Term] = {}
         self.commands: list | None = None
-        self.config: list | None = None
-        self.config_edit: dict[str, object] = {}
         self.toasts: list[dict] = []
         self.layout_sent = None
         self.layout_pending = (None, 0.0)
@@ -116,7 +116,6 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.vmmap_pane = VmmapPane(self)
         self.breakpoints_pane = BreakpointsPane(self)
         self.heap_pane = HeapPane(self)
-        self.cfg_card: TableCard | None = None  # created at first draw (column widths need the font)
         self.keys_card: TableCard | None = None
         self.backtrace_pane = BacktracePane(self)
         self.threads_pane = ThreadsPane(self)
@@ -126,16 +125,11 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
 
         self.console_pane = ConsolePane(self, list(st["console_history"]))
         self.io_pane = ProgramIOPane(self, [h for h in st["io_history"] if isinstance(h, dict)])
+        self.commands_pane = CommandsPane(self)
+        self.config_pane = ConfigPane(self)
+        self.cyclic_pane = CyclicPane(self)
         # misc tool state
         self.watch_input = ""
-        self.cmd_filter = ""
-        self.cmd_selected = None
-        self.cfg_filter = ""
-        self.cfg_modified_only = False
-        self.cyclic_len = 200
-        self.cyclic_n: int | None = None  # None: the target's pointer size (see cyclic_size)
-        self.cyclic_value = ""
-        self.cyclic_result = ""
         self.palette_open = False
         self.palette_query = ""
         self.palette_sel = 0
@@ -168,7 +162,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         return int(self.state.get("ptrsize") or 8)
 
     @property
-    def endian(self) -> str:
+    def endian(self) -> Literal["little", "big"]:
         return "big" if self.state.get("endian") == "big" else "little"
 
     def is_running(self) -> bool:
