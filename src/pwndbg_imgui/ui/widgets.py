@@ -170,16 +170,21 @@ class TableCard:
         th = self.app.theme
         bg = u32(self.bg_now)
         dl.push_clip_rect(p0, p1, False)
-        for corner, center, a0, a1 in (
-            (ImVec2(p0.x, p0.y), ImVec2(p0.x + r, p0.y + r), 1.5 * math.pi, math.pi),
-            (ImVec2(p1.x, p0.y), ImVec2(p1.x - r, p0.y + r), 1.5 * math.pi, 2.0 * math.pi),
-            (ImVec2(p1.x, p1.y), ImVec2(p1.x - r, p1.y - r), 0.0, 0.5 * math.pi),
-            (ImVec2(p0.x, p1.y), ImVec2(p0.x + r, p1.y - r), 0.5 * math.pi, math.pi),
+        # Each corner: a thick arc stroke from the outline's radius outwards, past the card's
+        # corner (clipped to the card). Strokes follow the curve exactly (a concave fill of
+        # "corner + arc" filled the chord instead and left a crescent of pane color inside the
+        # outline). Same centers as the outline, which AddRect strokes at p0+0.5 .. p1-0.5.
+        q0, q1 = ImVec2(p0.x + 0.5, p0.y + 0.5), ImVec2(p1.x - 0.5, p1.y - 0.5)
+        width = r + 2.0  # radius r .. 2r+2 from the center: covers the corner (at r*sqrt(2))
+        for center, a0, a1 in (
+            (ImVec2(q0.x + r, q0.y + r), math.pi, 1.5 * math.pi),
+            (ImVec2(q1.x - r, q0.y + r), 1.5 * math.pi, 2.0 * math.pi),
+            (ImVec2(q1.x - r, q1.y - r), 0.0, 0.5 * math.pi),
+            (ImVec2(q0.x + r, q1.y - r), 0.5 * math.pi, math.pi),
         ):
             dl.path_clear()
-            dl.path_line_to(corner)
-            dl.path_arc_to(center, r, a0, a1, 8)
-            dl.path_fill_concave(bg)
+            dl.path_arc_to(center, r + width / 2, a0, a1, 12)
+            dl.path_stroke(bg, width)
         dl.add_rect(p0, p1, u32(mix(th.border, th.fg, 0.08)), r)
         dl.pop_clip_rect()
 
