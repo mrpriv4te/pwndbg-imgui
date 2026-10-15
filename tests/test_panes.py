@@ -46,4 +46,5 @@ def test_imgui_bindings_used_by_the_detached_view_drag():
         assert hasattr(imgui.internal.Window, name), name
     for name in ("id_", "platform_handle"):
         assert hasattr(imgui.Viewport, name), name
-    assert callable(imgui.find_viewport_by_id) and callable(imgui.internal.clear_active_id)
+    for fn in (imgui.find_viewport_by_id, imgui.internal.clear_active_id, imgui.internal.clear_drag_drop):
+        assert callable(fn)

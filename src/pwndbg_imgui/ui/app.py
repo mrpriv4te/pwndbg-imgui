@@ -648,8 +648,12 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
             return
         handle = capsule_pointer(vp.platform_handle)
         if handle and ctl.wm_move(handle):
-            io.add_mouse_button_event(0, False)  # the WM gets the release; end ImGui's move
+            # End ImGui's move without a drop: dragging a window also carries it as a docking
+            # drag-and-drop payload, and the release (queued below, since the WM gets the real
+            # one) would drop it onto itself, now under the cursor (IM_ASSERT target != payload).
+            imgui.internal.clear_drag_drop()
             imgui.internal.clear_active_id()
+            io.add_mouse_button_event(0, False)
 
     def pre_new_frame(self) -> None:
         self.process_inbox()
