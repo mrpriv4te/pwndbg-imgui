@@ -3,18 +3,40 @@
 from __future__ import annotations
 
 SECTION_META = {
-    # name: (label, icon attr, follow, visible by default, dock space)
-    "regs": ("Registers", "MICROCHIP", "top", True, "Right"),
+    # name: (label, icon attr, follow, visible by default, dock space; see DOCK_SPLITS)
+    "regs": ("Registers", "MICROCHIP", "top", True, "Top"),
     "disasm": ("Disassembly", "CODE", "pc", True, "MainDockSpace"),
     "code": ("Source", "FILE_CODE", "pc", True, "MainDockSpace"),
-    "stack": ("Stack", "LAYER_GROUP", "top", True, "RightMid"),
+    "stack": ("Stack", "LAYER_GROUP", "top", True, "Right"),
     "backtrace": ("Backtrace", "SHOE_PRINTS", "top", True, "RightBottom"),
-    "args": ("Arguments", "LIST_OL", "top", False, "RightMid"),
-    "expressions": ("Watch", "EYE", "top", True, "RightMid"),
+    "args": ("Arguments", "LIST_OL", "top", False, "Right"),
+    "expressions": ("Watch", "EYE", "top", True, "Right"),
     "threads": ("Threads", "BARS_STAGGERED", "top", True, "RightBottom"),
     "heap_tracker": ("Heap Tracker", "CUBES", "top", False, "RightBottom"),
     "last_signal": ("Last Signal", "BOLT", "top", False, "RightBottom"),
 }
+
+# The built-in layout (first run, View > Reset to built-in layout), as proportions:
+#   Registers across the top; below, a left column (code views over Console / Program I/O)
+#   and a right column (Stack / Heap / Watch over Breakpoints / Backtrace / VMMap...).
+# (parent dock space, new dock space, side, ratio of the parent taken by the new one)
+DOCK_SPLITS = [
+    ("MainDockSpace", "Top", "up", 0.22),
+    ("MainDockSpace", "Right", "right", 0.43),
+    ("MainDockSpace", "Bottom", "down", 0.47),
+    ("Right", "RightBottom", "down", 0.29),
+]
+
+# Tab order inside each dock space: context sections by name, tool windows by label (without
+# their icon). Windows not listed keep their place after these.
+TAB_ORDER = [
+    "disasm", "code", "Decompiler", "Memory", "Commands", "pwndbg Config",
+    "stack", "Heap", "expressions", "args",
+    "Breakpoints", "backtrace", "VMMap", "threads", "Pattern (cyclic)", "last_signal", "heap_tracker",
+    "Preferences",
+    "Console", "Program I/O",
+    "regs",
+]
 
 
 # Registers worth following in the Memory view, by gdb architecture name (first match wins;

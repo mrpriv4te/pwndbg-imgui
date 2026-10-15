@@ -92,13 +92,13 @@ def test_nested_dicts_merge_per_key():
     b.binary("/x/chall")["bps"] = [{"kind": "break", "where": "main"}]
     b.save()
     s = Settings()
-    assert s["pwndbg_config"] == {"context-stack-lines": 20, "show-flags": True}
+    assert s["pwndbg_config"]["context-stack-lines"] == 20 and s["pwndbg_config"]["show-flags"] is True
     assert s.binary("/x/chall") == {"args": "AAAA", "bps": [{"kind": "break", "where": "main"}]}
 
 
 def test_deleting_a_key_is_saved():
     s = Settings()
-    s["pwndbg_config"].update({"a": 1, "b": 2})
+    s["pwndbg_config"].update({"a": 1, "b": 2})  # on top of the shipped defaults
     s.save()
     s = Settings()
     s["pwndbg_config"].clear()  # "clear saved config" in the Config pane
@@ -135,3 +135,10 @@ def test_unknown_keys_from_a_newer_version_are_kept(config_home):
     s["theme"] = "X"
     s.save()
     assert json.loads((config_home / "settings.json").read_text())["future_option"] == 1
+
+
+def test_shipped_pwndbg_defaults_apply_until_the_user_has_saved_their_own(config_home):
+    assert Settings()["pwndbg_config"]["show-compact-regs"] == "hardcut"
+    config_home.mkdir(parents=True, exist_ok=True)
+    (config_home / "settings.json").write_text(json.dumps({"pwndbg_config": {"show-flags": "off"}}))
+    assert Settings()["pwndbg_config"] == {"show-flags": "off"}  # a saved config replaces them

@@ -30,7 +30,7 @@ from .views import CmdView, DecompView, MemoryView
 from .widgets import TableCard, TextView, ansi_inline, v4
 
 
-from .catalog import AUTOFIT_HEIGHT, SECTION_META
+from .catalog import AUTOFIT_HEIGHT, DOCK_SPLITS, SECTION_META, TAB_ORDER
 
 
 class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
@@ -866,31 +866,29 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         status = hello_imgui.EdgeToolbarOptions(size_em=1.6, window_padding_em=ImVec2(0.6, 0.2))
         cb.add_edge_toolbar(hello_imgui.EdgeToolbarType.bottom, self.status_bar, status)
 
-        D = hello_imgui.DockingSplit
         rp.docking_params.docking_splits = [
-            D("MainDockSpace", "Right", imgui.Dir.right, 0.42),
-            D("MainDockSpace", "Bottom", imgui.Dir.down, 0.36),
-            D("Right", "RightMid", imgui.Dir.down, 0.60),
-            D("RightMid", "RightBottom", imgui.Dir.down, 0.45),
+            hello_imgui.DockingSplit(parent, new, getattr(imgui.Dir, side), ratio)
+            for parent, new, side, ratio in DOCK_SPLITS
         ]
         windows = []
+        keys = {}  # window -> its TAB_ORDER key
         self.default_visible = {}
-        order = ["disasm", "code"]
-        for name in order + [n for n in SECTIONS if n not in order]:
+        for name in SECTIONS:
             label, _icon, _follow, visible, dock = SECTION_META[name]
             lbl = self.sections[name]["label"]
             dw = hello_imgui.DockableWindow(lbl, dock, self.section_gui(name))
             dw.is_visible = visible
             self.default_visible[lbl] = visible
             windows.append(dw)
+            keys[lbl] = name
         for label, fn, dock, visible in self.tool_windows():
             dw = hello_imgui.DockableWindow(label, dock, fn)
             dw.is_visible = visible
             self.default_visible[label] = visible
-            if label.endswith((" Memory", DecompView.LABEL)):
-                windows.insert(2, dw)
-            else:
-                windows.append(dw)
+            windows.append(dw)
+            keys[label] = label.split(" ", 1)[-1]  # without the icon
+        rank = {key: i for i, key in enumerate(TAB_ORDER)}
+        windows.sort(key=lambda dw: rank.get(keys[dw.label], len(rank)))  # stable: unlisted keep their order
         for dw in windows:
             if dw.label in (self.sections["disasm"]["label"], f"{fa.ICON_FA_TERMINAL} Console"):
                 dw.focus_window_at_next_frame = True

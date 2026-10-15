@@ -641,9 +641,9 @@ class PanelsMixin:
             (f"{fa.ICON_FA_DRAGON} {DecompView.LABEL}", self.decomp.gui, "MainDockSpace", True),
             (VmmapPane.LABEL, self.vmmap_pane.gui, "RightBottom", True),
             (BreakpointsPane.LABEL, self.breakpoints_pane.gui, "RightBottom", True),
-            (HeapPane.LABEL, self.heap_pane.gui, "MainDockSpace", False),
+            (HeapPane.LABEL, self.heap_pane.gui, "Right", True),
             (f"{fa.ICON_FA_BOOK} Commands", self.commands_gui, "MainDockSpace", False),
             (f"{fa.ICON_FA_SLIDERS} pwndbg Config", self.config_gui, "MainDockSpace", False),
-            (f"{fa.ICON_FA_HASHTAG} Pattern (cyclic)", self.cyclic_gui, "RightBottom", False),
+            (f"{fa.ICON_FA_HASHTAG} Pattern (cyclic)", self.cyclic_gui, "RightBottom", True),
             (f"{fa.ICON_FA_GEAR} Preferences", self.prefs_gui, "RightBottom", False),
         ]

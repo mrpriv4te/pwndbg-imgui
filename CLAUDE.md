@@ -65,7 +65,8 @@ src/pwndbg_imgui/
     widgets.py    TextView (the core text pane) + helpers
     appearance.py fonts + apply_theme (mixin)
     native.py     GLFW-via-ctypes window control (themed title bar)
-    catalog.py    SECTION_META, TOOL_PRESETS, AUTOFIT_HEIGHT
+    catalog.py    SECTION_META, the built-in layout (DOCK_SPLITS, TAB_ORDER), TOOL_PRESETS,
+                  AUTOFIT_HEIGHT, ARG_REGS
 tools/guitest.py  GUI test driver (dev only, not shipped) + tools/smoke.steps
 ```
 `App` is composed of mixins: `class App(SectionsMixin, AppearanceMixin, PanelsMixin,

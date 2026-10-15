@@ -55,7 +55,9 @@ class Settings:
         "custom_titlebar": True,
         "remember_bps": True,
         "persist_pwndbg_config": True,
-        "pwndbg_config": {},  # pwndbg parameters changed in the Config pane, re-applied each run
+        # pwndbg parameters changed in the Config pane, re-applied each run; the defaults here
+        # are a starting point (registers in compact columns, flags shown)
+        "pwndbg_config": {"show-compact-regs": "hardcut", "show-compact-regs-columns": "3", "show-flags": "on"},
         "decomp_autoconnect": True,
         "autofit": True,
         "io_raw": True,
