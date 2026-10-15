@@ -23,6 +23,7 @@ from ..transport import Pty, Rpc
 from .appearance import AppearanceMixin
 from .chrome import ChromeMixin
 from .native import NativeWindow, capsule_pointer
+from .console_panes import ConsolePane, ProgramIOPane
 from .panels import PanelsMixin
 from .panes import BacktracePane, BreakpointsPane, HeapPane, RegistersBar, ThreadsPane, VmmapPane
 from .sections import SectionsMixin
@@ -65,7 +66,6 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.io_term = Term(max_lines=20000, show_ctrl=True)
         self.io = None if cfg.no_io else Pty(self.io_term, raw=st["io_raw"], keep_bytes=1 << 20)
         self.io_hex_term = Term(max_lines=100000)
-        self.io_hex_version = -1
 
         self.proc = None
         self.rpc: Rpc | None = None
@@ -124,19 +124,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.cmd_views: list[CmdView] = []
         self.views_to_add: list[CmdView] = []
 
-        # console
-        self.console_input = ""
-        self.history: list[str] = list(st["console_history"])
-        self.history_pos = -1
-        self.console_replace: str | None = None
-        self.completions: list[str] = []
-        self.focus_console = True
-        # program io
-        self.io_input = ""
-        self.io_mode = "text"
-        self.io_history: list[dict] = [h for h in st["io_history"] if isinstance(h, dict)]
-        self.io_history_pos = -1
-        self.io_view_mode = "terminal"
+        self.console_pane = ConsolePane(self, list(st["console_history"]))
+        self.io_pane = ProgramIOPane(self, [h for h in st["io_history"] if isinstance(h, dict)])
         # misc tool state
         self.watch_input = ""
         self.cmd_filter = ""
@@ -732,8 +721,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.save_breakpoints()
         st = self.settings
         st["views"] = [{"cmd": v.cmd, "auto": v.auto} for v in self.cmd_views]
-        st["console_history"] = self.history
-        st["io_history"] = self.io_history
+        st["console_history"] = self.console_pane.history
+        st["io_history"] = self.io_pane.history
         st["ui_size"] = self.ui_size
         st["code_size"] = self.code_size
         st.binary(self.cfg.binary)["args"] = self.args_input

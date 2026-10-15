@@ -7,13 +7,13 @@ import re
 
 from imgui_bundle import ImVec2, hello_imgui, imgui
 from imgui_bundle import icons_fontawesome_6 as fa
-from ..agent import debug, debug_enabled
-from ..payload import cyclic, cyclic_find, eval_payload, hexdump_ansi, parse_bytes_input
+from ..payload import cyclic, cyclic_find
 from ..term import ECHO, strip_ansi
 from ..theme import THEMES
+from .console_panes import ConsolePane, ProgramIOPane
 from .panes import BreakpointsPane, HeapPane, VmmapPane
 from .views import DecompView
-from .widgets import TableCard, buttons_width, combo_width, help_marker, v4
+from .widgets import TableCard, buttons_width, help_marker, v4
 
 
 class PanelsMixin:
@@ -70,256 +70,6 @@ class PanelsMixin:
             self.exec(f'contextwatch {"execute" if add_cmd else "eval"} "{expr}"')
             self.watch_input = ""
 
-    def console_gui(self) -> None:
-        th = self.theme
-        footer = imgui.get_frame_height_with_spacing() + 2
-        self.console_view.render(-footer)
-        if self.console is not None:
-            self.console.resize(self.console_view.rows, self.console_view.cols)
-        if self.completions:
-            n = min(len(self.completions), 12)
-            imgui.set_next_window_pos(imgui.get_cursor_screen_pos(), imgui.Cond_.always, ImVec2(0, 1))
-            if imgui.begin_tooltip():
-                for c in self.completions[:n]:
-                    imgui.text_unformatted(c)
-                if len(self.completions) > n:
-                    imgui.text_disabled(f"… {len(self.completions) - n} more")
-                imgui.end_tooltip()
-        running = self.is_running()
-        icon = fa.ICON_FA_PERSON_RUNNING if running else fa.ICON_FA_ANGLES_RIGHT
-        imgui.align_text_to_frame_padding()  # center the icon on the input box's line
-        imgui.text_colored(v4(th.green if running else th.accent), icon)
-        imgui.same_line()
-        imgui.set_next_item_width(-1)
-        if self.focus_console or (
-            imgui.is_window_focused() and not imgui.is_any_item_active() and not imgui.is_any_mouse_down()
-            and self.console_view.selection() is None and not self.console_view.search_open
-        ):
-            imgui.set_keyboard_focus_here()
-            self.focus_console = False
-        flags = (imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.callback_history
-                 | imgui.InputTextFlags_.callback_completion | imgui.InputTextFlags_.callback_always)
-        if running:
-            hint = "program running — commands are queued until it stops (F6 / Ctrl+C interrupts)"
-        elif not self.gdb_idle and self.connected():
-            hint = "gdb is busy — commands are queued"
-        else:
-            hint = "gdb / pwndbg command  (Tab: complete, ↑↓: history)"
-        imgui.push_font(self.mono, self.ui_size)  # an input box: sized like the UI, not the code panes
-        entered, self.console_input = imgui.input_text_with_hint("##console_in", hint, self.console_input, flags, self._console_cb)
-        imgui.pop_font()
-        if (not entered and self.console_input.strip() and debug_enabled()
-                and (imgui.is_key_pressed(imgui.Key.enter, False) or imgui.is_key_pressed(imgui.Key.keypad_enter, False))):
-            debug(f"console: Enter pressed but the command was not submitted ({self._focus_report()})")
-        if imgui.is_item_active():
-            io = imgui.get_io()
-            if io.key_ctrl and imgui.is_key_pressed(imgui.Key.c, False) and running:
-                self.interrupt()
-            elif io.key_ctrl and imgui.is_key_pressed(imgui.Key.l, False):
-                self.console_term.clear()
-            elif io.key_ctrl and imgui.is_key_pressed(imgui.Key.d, False) and not self.console_input:
-                self.send_console("")
-        if imgui.is_item_edited():
-            self.completions = []
-        if entered:
-            cmd = self.console_input
-            debug(f"console: submit {cmd!r} (attached={self.attached} running={running} "
-                  f"gdb_idle={self.gdb_idle} connected={self.connected()})")
-            if cmd.strip() and (not self.history or self.history[-1] != cmd):
-                self.history.append(cmd)
-            self.history_pos = -1
-            self.completions = []
-            if running:
-                self.toast(f"{fa.ICON_FA_PERSON_RUNNING}  Program running: '{cmd}' runs when it stops (F6 to interrupt)", "warn", 4.0)
-            elif not self.gdb_idle and self.connected():
-                self.toast(f"{fa.ICON_FA_HOURGLASS_HALF}  gdb is busy: '{cmd}' is queued", "warn", 3.0)
-            self.send_console(cmd)
-            self.console_input = ""
-            self.console_view.at_bottom = True
-            imgui.set_keyboard_focus_here(-1)
-
-    def _focus_report(self) -> str:
-        """Who has the keyboard right now, for --debug logs of input problems."""
-        io = imgui.get_io()
-        try:
-            ctx = imgui.get_current_context()
-            focused = ctx.nav_window.name if ctx.nav_window else None
-            active = ctx.active_id_window.name if ctx.active_id_window else None
-            active_id = ctx.active_id
-        except Exception:
-            focused = active = active_id = "?"
-        return (f"focused window={focused!r}, active item={active_id} in {active!r}, "
-                f"input active={imgui.is_item_active()}, want_text_input={io.want_text_input}, "
-                f"ctrl={io.key_ctrl} alt={io.key_alt} shift={io.key_shift} super={io.key_super}, "
-                f"app focus lost={io.app_focus_lost}")
-
-    def _console_cb(self, data) -> int:
-        F = imgui.InputTextFlags_
-        if data.event_flag == F.callback_always:
-            if self.console_replace is not None:
-                data.delete_chars(0, data.buf_text_len)
-                data.insert_chars(0, self.console_replace)
-                self.console_replace = None
-            return 0
-        if data.event_flag == F.callback_history:
-            if not self.history:
-                return 0
-            if data.event_key == imgui.Key.up_arrow:
-                self.history_pos = len(self.history) - 1 if self.history_pos == -1 else max(0, self.history_pos - 1)
-            elif data.event_key == imgui.Key.down_arrow and self.history_pos != -1:
-                self.history_pos += 1
-                if self.history_pos >= len(self.history):
-                    self.history_pos = -1
-            text = self.history[self.history_pos] if self.history_pos != -1 else ""
-            data.delete_chars(0, data.buf_text_len)
-            data.insert_chars(0, text)
-            return 0
-        if data.event_flag == F.callback_completion and self.rpc and not self.is_running():
-            text = data.buf
-
-            def done(lines, text=text):
-                if not lines:
-                    self.completions = []
-                    return
-                prefix = os.path.commonprefix(lines)
-                if len(lines) == 1:
-                    self.console_replace = lines[0] + " "
-                    self.completions = []
-                else:
-                    if len(prefix) > len(text):
-                        self.console_replace = prefix
-                    self.completions = lines
-
-            self.rpc.request("complete", done, None, text=text)
-        return 0
-
-    def io_gui(self) -> None:
-        th = self.theme
-        st = self.settings
-        if self.io is None or self.io_is_external():
-            imgui.push_text_wrap_pos(0)
-            if self.attached:
-                imgui.text_disabled("This GUI is attached to an existing gdb session (init-pwndbg-imgui): the program's "
-                                    "input/output belong to whoever started it (e.g. your pwntools script).")
-            elif self.io is not None:  # io_is_external(): a remote target
-                where = self.state.get("remote_addr") or self.info.get("remote_addr") or "gdbserver"
-                imgui.text_colored(v4(th.accent), f"{fa.ICON_FA_CIRCLE_INFO}  Remote target ({where})")
-                imgui.text_disabled("The program runs under gdbserver, so its input/output don't go through gdb "
-                                    "and can't be shown here. Talk to it where it was started:")
-                imgui.bullet_text("pwntools (gdb.debug, exploit.py -d ui): from the script, "
-                                  "e.g. io.sendline(...) / io.interactive()")
-                imgui.bullet_text("gdbserver started by hand: in the terminal where gdbserver runs")
-            else:
-                imgui.text_disabled("Program I/O is disabled (--no-io): the program shares the gdb console.")
-            imgui.pop_text_wrap_pos()
-            return
-        # header
-        imgui.set_next_item_width(combo_width("Python expr"))
-        modes = {"text": "Text", "python": "Python expr", "hex": "Hex"}
-        if imgui.begin_combo("##iomode", modes[self.io_mode]):
-            for k, v in modes.items():
-                if imgui.selectable(v, self.io_mode == k)[0]:
-                    self.io_mode = k
-            imgui.end_combo()
-        imgui.set_item_tooltip("Text: sent as typed\nPython expr: b'A'*40 + p64(0x401136), cyclic(100), …\nHex: 41 41 0a")
-        imgui.same_line()
-        _, st["io_newline"] = imgui.checkbox("\\n", st["io_newline"])
-        imgui.set_item_tooltip("Append a newline to what you send")
-        imgui.same_line()
-        _, st["io_echo"] = imgui.checkbox("Echo", st["io_echo"])
-        imgui.set_item_tooltip("Show what you send (dimmed)")
-        imgui.same_line()
-        changed, st["io_raw"] = imgui.checkbox("Raw", st["io_raw"])
-        if changed:
-            self.io.set_raw(st["io_raw"])
-        imgui.set_item_tooltip("Raw TTY: bytes pass through untouched (binary-safe).\nUncheck for a canonical TTY (line editing, ^C, ^D = EOF).")
-        imgui.same_line()
-        imgui.set_next_item_width(combo_width("Terminal"))
-        if imgui.begin_combo("##ioview", self.io_view_mode.capitalize()):
-            for k in ("terminal", "hexdump"):
-                if imgui.selectable(k.capitalize(), self.io_view_mode == k)[0]:
-                    self.io_view_mode = k
-            imgui.end_combo()
-        imgui.same_line()
-        if imgui.button(fa.ICON_FA_TRASH + "##ioclear"):
-            self.io_term.clear()
-            with self.io_term.lock:
-                self.io.raw_bytes.clear()
-                self.io.bytes_version += 1
-        imgui.set_item_tooltip("Clear")
-        imgui.same_line()
-        imgui.begin_disabled(st["io_raw"])
-        if imgui.button("EOF"):
-            self.io.write(b"\x04")
-        imgui.end_disabled()
-        if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled):
-            imgui.set_tooltip("Send ^D (end of file). Needs a non-raw TTY.")
-        imgui.same_line()
-        imgui.text_disabled(self.io.path)
-
-        footer = imgui.get_frame_height_with_spacing() + 2
-        if self.io_view_mode == "hexdump":
-            if self.io.bytes_version != self.io_hex_version:
-                self.io_hex_version = self.io.bytes_version
-                with self.io_term.lock:
-                    data = bytes(self.io.raw_bytes)
-                self.io_hex_term.set_text(hexdump_ansi(data))
-            self.io_hex_view.render(-footer)
-        else:
-            self.io_view.render(-footer)
-            self.io.resize(self.io_view.rows, self.io_view.cols)
-
-        imgui.align_text_to_frame_padding()  # center the icon on the input box's line
-        imgui.text_colored(v4(th.accent2), fa.ICON_FA_KEYBOARD)
-        imgui.same_line()
-        imgui.set_next_item_width(-buttons_width("Send"))
-        imgui.push_font(self.mono, self.ui_size)  # an input box: sized like the UI, not the code panes
-        entered, self.io_input = imgui.input_text_with_hint(
-            "##io_in", "input for the program (Enter to send, Up/Down: history)", self.io_input,
-            imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.callback_history, self._io_history_cb)
-        imgui.pop_font()
-        imgui.same_line()
-        if (imgui.button("Send##io") or entered) and (self.io_input or st["io_newline"]):
-            self.send_io(self.io_input)
-            imgui.set_keyboard_focus_here(-1)
-
-    def _io_history_cb(self, data) -> int:
-        hist = self.io_history
-        if not hist:
-            return 0
-        if data.event_key == imgui.Key.up_arrow:
-            self.io_history_pos = len(hist) - 1 if self.io_history_pos == -1 else max(0, self.io_history_pos - 1)
-        elif data.event_key == imgui.Key.down_arrow and self.io_history_pos != -1:
-            self.io_history_pos += 1
-            if self.io_history_pos >= len(hist):
-                self.io_history_pos = -1
-        entry = hist[self.io_history_pos] if self.io_history_pos != -1 else {"text": ""}
-        if entry.get("mode") in ("text", "python", "hex"):
-            self.io_mode = entry["mode"]  # a payload comes back with the mode it was sent in
-        data.delete_chars(0, data.buf_text_len)
-        data.insert_chars(0, entry["text"])
-        return 0
-
-    def send_io(self, text: str) -> None:
-        try:
-            if self.io_mode == "python":
-                data = eval_payload(text, word=self.ptrsize, endian=self.endian)
-            else:
-                data = parse_bytes_input(text, self.io_mode)
-        except Exception as e:
-            self.toast(f"bad input: {e}", "error")
-            return
-        if self.settings["io_newline"]:
-            data += b"\n"
-        self.io.write(data)
-        if self.settings["io_echo"]:
-            self.io_term.feed(data.decode("utf-8", errors="surrogateescape"), ECHO)
-        entry = {"mode": self.io_mode, "text": text}
-        if text and (not self.io_history or self.io_history[-1] != entry):
-            self.io_history.append(entry)
-        self.io_history_pos = -1
-        self.io_input = ""
-
     def memory_gui(self) -> None:
         self.memory.gui()
 
@@ -363,9 +113,8 @@ class PanelsMixin:
                 imgui.same_line()
                 imgui.text_disabled("aliases: " + ", ".join(c["aliases"]))
             if imgui.button(f"{fa.ICON_FA_TERMINAL} Insert in console"):
-                self.console_replace = c["name"] + " "
-                self.focus_window(f"{fa.ICON_FA_TERMINAL} Console")
-                self.focus_console = True
+                self.console_pane.prefill(c["name"] + " ")
+                self.focus_window(ConsolePane.LABEL)
             imgui.same_line()
             if imgui.button(f"{fa.ICON_FA_TABLE_CELLS} Open as view"):
                 self.open_cmd_view(c["name"])
@@ -635,8 +384,8 @@ class PanelsMixin:
 
     def tool_windows(self):
         return [
-            (f"{fa.ICON_FA_TERMINAL} Console", self.console_gui, "Bottom", True),
-            (f"{fa.ICON_FA_KEYBOARD} Program I/O", self.io_gui, "Bottom", True),
+            (ConsolePane.LABEL, self.console_pane.gui, "Bottom", True),
+            (ProgramIOPane.LABEL, self.io_pane.gui, "Bottom", True),
             (f"{fa.ICON_FA_MEMORY} Memory", self.memory_gui, "MainDockSpace", True),
             (f"{fa.ICON_FA_DRAGON} {DecompView.LABEL}", self.decomp.gui, "MainDockSpace", True),
             (VmmapPane.LABEL, self.vmmap_pane.gui, "RightBottom", True),

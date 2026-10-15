@@ -11,6 +11,7 @@ from .. import APP_NAME, __version__
 from ..settings import Settings
 from ..theme import THEMES, Theme, mix, u32
 from .catalog import TOOL_PRESETS
+from .console_panes import ConsolePane
 from .widgets import TableCard, ansi_inline, v4, vsep
 
 
@@ -87,8 +88,8 @@ class ChromeMixin:
             elif pressed(K._0):
                 self.zoom_reset()
             elif pressed(K.grave_accent):
-                self.focus_window(f"{fa.ICON_FA_TERMINAL} Console")
-                self.focus_console = True
+                self.focus_window(ConsolePane.LABEL)
+                self.console_pane.focus_next = True
         if io.key_ctrl and io.mouse_wheel and imgui.is_window_hovered(imgui.HoveredFlags_.any_window):
             self.zoom(1 if io.mouse_wheel > 0 else -1)
             io.mouse_wheel = 0.0
@@ -486,9 +487,8 @@ class ChromeMixin:
         if imgui.get_io().key_shift:
             self.open_cmd_view(c["name"])
         else:
-            self.console_replace = c["name"] + " "
-            self.focus_window(f"{fa.ICON_FA_TERMINAL} Console")
-            self.focus_console = True
+            self.console_pane.prefill(c["name"] + " ")
+            self.focus_window(ConsolePane.LABEL)
 
     def palette(self) -> None:
         if self.palette_open:
