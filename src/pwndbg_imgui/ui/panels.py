@@ -390,8 +390,12 @@ class PanelsMixin:
         _, self.cfg_filter = imgui.input_text_with_hint("##cfgf", f"{fa.ICON_FA_FILTER} filter parameters", self.cfg_filter)
         imgui.same_line()
         if imgui.button(f"{fa.ICON_FA_ARROWS_ROTATE}##cfgr"):
-            self.rpc.request("config", self._set_config, self.error_toast)
+            self.reload_config()
         imgui.set_item_tooltip("Reload values from gdb")
+        n_modified = sum(1 for p in self.config if self.config_modified(p))
+        _, self.cfg_modified_only = imgui.checkbox(f"Modified only ({n_modified})##cfgmod", self.cfg_modified_only)
+        imgui.set_item_tooltip("Show only the parameters that differ from pwndbg's default")
+        imgui.same_line(0, 18)
         _, st["persist_pwndbg_config"] = imgui.checkbox("Remember my changes across runs", st["persist_pwndbg_config"])
         help_marker("pwndbg does not persist its config itself. When enabled, parameters you change here "
                     "are saved and re-applied automatically on the next run "
@@ -420,7 +424,10 @@ class PanelsMixin:
         for p in self.config:
             if flt and flt not in p["name"] and flt not in p["doc"].lower():
                 continue
-            if p["scope"] != scope and not flt:
+            modified = self.config_modified(p)
+            if self.cfg_modified_only and not modified:
+                continue
+            if p["scope"] != scope and not flt and not self.cfg_modified_only:
                 scope = p["scope"]
                 imgui.table_next_row(imgui.TableRowFlags_.headers)
                 imgui.table_next_column()
@@ -428,14 +435,27 @@ class PanelsMixin:
             imgui.table_next_row()
             imgui.table_next_column()
             card.cell(p["name"])
-            imgui.text_unformatted(p["name"])
-            imgui.set_item_tooltip(p["help"])
+            if modified:  # differs from pwndbg's default
+                imgui.text_colored(v4(th.accent), f"● {p['name']}")
+                imgui.set_item_tooltip(f"Changed (default: {p['default']})\n\n{p['help']}")
+            elif p["name"] in self.PWNDBG_CONFIG_DENY:
+                imgui.text_disabled(f"  {p['name']}")
+                imgui.set_item_tooltip(f"Managed by pwndbg-imgui (it routes the context panes)\n\n{p['help']}")
+            else:
+                imgui.text_unformatted(f"  {p['name']}")
+                imgui.set_item_tooltip(p["help"])
             imgui.table_next_column()
             card.cell(str(p["value"]))
-            imgui.set_next_item_width(-1)
+            reset_w = buttons_width(fa.ICON_FA_ROTATE_LEFT) if modified else 0.0
+            imgui.set_next_item_width(-reset_w if modified else -1)
             imgui.push_font(self.mono, self.ui_size)
             self._config_widget(p)
             imgui.pop_font()
+            if modified:
+                imgui.same_line()
+                if imgui.small_button(f"{fa.ICON_FA_ROTATE_LEFT}##rst{p['name']}"):
+                    self.reset_config_param(p)
+                imgui.set_item_tooltip(f"Reset to the default: {p['default']}")
             imgui.table_next_column()
             card.cell(p["doc"])
             imgui.text_disabled(p["doc"])
@@ -444,13 +464,27 @@ class PanelsMixin:
     def _set_config(self, cfg) -> None:
         self.config = cfg
 
+    def config_modified(self, p) -> bool:
+        """Differs from pwndbg's default, and is the user's to change (not one the GUI sets)."""
+        return bool(p.get("modified")) and p["name"] not in self.PWNDBG_CONFIG_DENY
+
+    def reload_config(self) -> None:
+        """Fetch values again (after a change: the modified markers come from gdb)."""
+        if self.rpc:
+            self.rpc.request("config", self._set_config, self.error_toast)
+
+    def reset_config_param(self, p) -> None:
+        self.exec(f"set {p['name']} {p['reset']}", quiet=True, cb=lambda _o: self.reload_config())
+        self.forget_pwndbg_param(p["name"])
+        self.config_edit.pop("cfg:" + p["name"], None)
+
     def _config_widget(self, p) -> None:
         name, kind, value = p["name"], p["kind"], p["value"]
 
         def setv(v):
             p["value"] = v
             out = "on" if v is True else ("off" if v is False else str(v))
-            self.exec(f"set {name} {out}", quiet=True)
+            self.exec(f"set {name} {out}", quiet=True, cb=lambda _o: self.reload_config())
             self.persist_pwndbg_param(name, out)
 
         if kind == "bool":

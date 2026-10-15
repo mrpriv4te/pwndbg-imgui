@@ -141,6 +141,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.cmd_filter = ""
         self.cmd_selected = None
         self.cfg_filter = ""
+        self.cfg_modified_only = False
         self.cyclic_len = 200
         self.cyclic_n: int | None = None  # None: the target's pointer size (see cyclic_size)
         self.cyclic_value = ""
@@ -415,6 +416,10 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         if not self.settings["persist_pwndbg_config"] or name in self.PWNDBG_CONFIG_DENY:
             return
         self.settings["pwndbg_config"][name] = value
+
+    def forget_pwndbg_param(self, name: str) -> None:
+        """Back to its default: don't re-apply it next run."""
+        self.settings["pwndbg_config"].pop(name, None)
 
     def apply_pwndbg_config(self) -> None:
         """Re-apply the pwndbg parameters the user changed in earlier sessions."""

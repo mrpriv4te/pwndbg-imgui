@@ -927,10 +927,18 @@ class Agent:
             cfg.PARAM_STRING: "str",
             cfg.PARAM_OPTIONAL_FILENAME: "str",
         }
+        def as_set_arg(kind: str, v) -> str:  # a value as `set <name> <arg>` takes it
+            if kind == "auto" and v is None:
+                return "auto"
+            if isinstance(v, bool):
+                return "on" if v else "off"
+            return str(v)
+
         out = []
         for p in self.pwndbg.config.params.values():
             kind = kinds.get(p.param_class, "int")
             value = p.value
+            modified = p.value != p.default
             if kind == "auto":
                 value = "auto" if value is None else ("on" if value else "off")
             out.append(
@@ -939,6 +947,8 @@ class Agent:
                     "kind": kind,
                     "value": value if isinstance(value, (bool, int, str)) else str(value),
                     "default": p.pretty_default(),
+                    "modified": modified,
+                    "reset": as_set_arg(kind, p.default),  # the default, ready for `set`
                     "doc": p.set_show_doc,
                     "help": p.help_docstring,
                     "enum": list(p.enum_sequence or []),
