@@ -7,7 +7,7 @@ work on the code without re-deriving it.
 
 `pwndbg-imgui`: a dockable Dear ImGui GUI front-end for **pwndbg**, Ghidra/IDA style.
 A thin GUI that drives the user's existing **gdb + pwndbg** — it does not bundle pwndbg.
-Linux, x86-64, Python ≥ 3.11 (imgui-bundle has no 3.10 wheels); the agent
+Linux host, Python ≥ 3.11 (imgui-bundle has no 3.10 wheels); the agent
 runs in gdb's own Python and must stay 3.10-compatible. Installed with pipx. Single dependency: `imgui-bundle`.
 
 ## Architecture (the important part)
@@ -128,6 +128,17 @@ Gotchas when testing:
   (check the parent PID: the user may have their own instance open).
 - `hello_imgui.final_app_window_screenshot()` is only filled once the app exits; mid-run
   shots read the GL front buffer instead (done in `guitest.py`).
+
+## Target architectures
+
+The host is x86-64 Linux, but targets can be anything gdb + pwndbg support (qemu-user +
+gdbserver + gdb-multiarch). Never assume x86-64 on the target: the agent reports
+`state["ptrsize"]` / `state["endian"]` (`App.ptrsize` / `App.endian`) and `state["arch"]`
+(gdb's name, e.g. "i386:x86-64", "aarch64", "armv7", "mips:isa32r2"). Per-architecture data
+lives in `catalog.py` (`ARG_REGS` / `arg_regs()`); use `$pc` / `$sp` / `$fp` in generic
+code. To test: `zig cc -target aarch64-linux-musl -static` (or arm-linux-musleabihf,
+mips-linux-musleabi), `qemu-<arch> -g PORT ./bin`, then
+`guitest.py ... -- --gdb gdb-multiarch -ex "target remote :PORT" ./bin`.
 
 ## Extending (where things plug in)
 

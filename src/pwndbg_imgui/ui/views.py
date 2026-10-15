@@ -12,6 +12,7 @@ from imgui_bundle import icons_fontawesome_6 as fa
 
 from ..term import Term
 from ..theme import u32
+from .catalog import arg_regs
 from .widgets import TextView, ansi_inline, combo_width, v4
 
 DISASM_ADDR_RE = re.compile(r"^[\sb+*►]{0,8}(0x[0-9a-fA-F]+)\b")
@@ -260,7 +261,7 @@ class DecompView:
 
 
 class MemoryView:
-    """Hex / qword memory viewer with region coloring, change highlighting,
+    """Hex / pointer-sized word memory viewer with region coloring, change highlighting,
     in-place editing and a data inspector."""
 
     def __init__(self, app) -> None:
@@ -269,7 +270,7 @@ class MemoryView:
         self.follow = ""
         self.base: int | None = None
         self.bpr = 16
-        self.mode = "bytes"  # bytes | qwords
+        self.mode = "bytes"  # bytes | words (pointer-sized: qwords on 64-bit, dwords on 32-bit)
         self.data = b""
         self.bad: list = []
         self.data_base = None
@@ -367,7 +368,10 @@ class MemoryView:
 
     def read_int(self, addr: int, size: int):
         bs = self.read_bytes(addr, size)
-        return None if bs is None else int.from_bytes(bs, "little")
+        return None if bs is None else int.from_bytes(bs, self.app.endian)
+
+    def mode_label(self, mode: str) -> str:
+        return mode if mode == "bytes" else ("qwords" if self.app.ptrsize == 8 else "dwords")
 
     def write_byte(self, addr: int, value: int) -> None:
         if self.data_base is not None:
@@ -403,9 +407,9 @@ class MemoryView:
         if imgui.button("Go##mgo"):
             self.goto_expr(self.expr)
         imgui.same_line()
-        imgui.set_next_item_width(combo_width("follow $rsi"))
+        imgui.set_next_item_width(combo_width("follow $x30"))
         if imgui.begin_combo("##follow", f"follow {self.follow}" if self.follow else "no follow"):
-            for f in ("", "$sp", "$pc", "$bp", "$rdi", "$rsi", "$rax"):
+            for f in ("", "$sp", "$pc", "$fp", *arg_regs(app.state.get("arch"))):
                 if imgui.selectable(f or "no follow", self.follow == f)[0]:
                     self.follow = f
                     if f:
@@ -414,9 +418,9 @@ class MemoryView:
         imgui.set_item_tooltip("Re-evaluate this expression every time the program stops")
         imgui.same_line()
         imgui.set_next_item_width(combo_width("qwords"))
-        if imgui.begin_combo("##mmode", self.mode):
-            for m in ("bytes", "qwords"):
-                if imgui.selectable(m, self.mode == m)[0]:
+        if imgui.begin_combo("##mmode", self.mode_label(self.mode)):
+            for m in ("bytes", "words"):
+                if imgui.selectable(self.mode_label(m), self.mode == m)[0]:
                     self.mode = m
             imgui.end_combo()
         imgui.same_line()
@@ -475,15 +479,18 @@ class MemoryView:
         bpr = self.bpr
         digits = max(6, len(f"{self.base + rows * bpr:x}"))
         hex_x = pos.x + (digits + 2) * cw
+        ws = app.ptrsize  # word mode: one pointer-sized value per cell
+        word_w = 2 + 2 * ws  # "0x" + hex digits
+        word_cell = word_w + 2
         if self.mode == "bytes":
             cell = 3
             ascii_x = hex_x + (bpr * cell + bpr // 8) * cw + cw
         else:
             cell = 0
-            ascii_x = hex_x + (bpr // 8) * 20 * cw + cw
+            ascii_x = hex_x + (bpr // ws) * word_cell * cw + cw
         mouse = imgui.get_mouse_pos()
         hover_addr = None
-        hover_qword = None
+        hover_word = None
         dim = u32(th.dim)
         fg = u32(th.fg)
         for r in range(rows):
@@ -513,24 +520,24 @@ class MemoryView:
                     if x - cw * 0.5 <= mouse.x < x + cw * 2.5 and y <= mouse.y < y + lh:
                         hover_addr = a
             else:
-                for q in range(bpr // 8):
-                    a = addr + q * 8
-                    x = hex_x + q * 20 * cw
-                    v = self.read_int(a, 8)
-                    sel = self.sel is not None and a <= self.sel < a + 8
+                for q in range(bpr // ws):
+                    a = addr + q * ws
+                    x = hex_x + q * word_cell * cw
+                    v = self.read_int(a, ws)
+                    sel = self.sel is not None and a <= self.sel < a + ws
                     if sel:
-                        dl.add_rect_filled(ImVec2(x - 2, y), ImVec2(x + 18 * cw + 2, y + lh), u32(th.accent, 0.35), 3)
-                    elif any(self.changed(a + k) for k in range(8)):
-                        dl.add_rect_filled(ImVec2(x - 2, y), ImVec2(x + 18 * cw + 2, y + lh), u32(th.red, 0.28), 3)
+                        dl.add_rect_filled(ImVec2(x - 2, y), ImVec2(x + word_w * cw + 2, y + lh), u32(th.accent, 0.35), 3)
+                    elif any(self.changed(a + k) for k in range(ws)):
+                        dl.add_rect_filled(ImVec2(x - 2, y), ImVec2(x + word_w * cw + 2, y + lh), u32(th.red, 0.28), 3)
                     if v is None:
-                        dl.add_text(ImVec2(x, y), dim, "0x" + "?" * 16)
+                        dl.add_text(ImVec2(x, y), dim, "0x" + "?" * (2 * ws))
                     else:
                         vp = app.page_for(v)
                         c = u32(th.kind_color(vp[5])) if vp else (dim if v == 0 else fg)
-                        dl.add_text(ImVec2(x, y), c, f"{v:#018x}")
-                    if x <= mouse.x < x + 18 * cw and y <= mouse.y < y + lh:
+                        dl.add_text(ImVec2(x, y), c, f"{v:#0{word_w}x}")
+                    if x <= mouse.x < x + word_w * cw and y <= mouse.y < y + lh:
                         hover_addr = a
-                        hover_qword = v
+                        hover_word = v
             # ascii column
             chars = []
             for i in range(bpr):
@@ -549,13 +556,13 @@ class MemoryView:
             if imgui.is_mouse_clicked(0):
                 self.sel = hover_addr
                 self.nibble = None
-                if imgui.get_mouse_clicked_count(0) == 2 and hover_qword is not None and app.page_for(hover_qword):
-                    self.goto(hover_qword)
+                if imgui.get_mouse_clicked_count(0) == 2 and hover_word is not None and app.page_for(hover_word):
+                    self.goto(hover_word)
             if imgui.is_mouse_clicked(1):
                 self.sel = hover_addr
                 imgui.open_popup("##memctx")
-            if hover_qword is not None and app.page_for(hover_qword):
-                app.addr_tooltip(hover_qword)
+            if hover_word is not None and app.page_for(hover_word):
+                app.addr_tooltip(hover_word)
 
         if imgui.is_window_focused() and self.sel is not None:
             self._keys(io)
@@ -568,7 +575,8 @@ class MemoryView:
 
     def _context_menu(self, app, th, a: int) -> None:
         imgui.text_colored(v4(th.accent), f"{a:#x}")
-        q = self.read_int(a & ~7 if self.mode == "qwords" else a, 8)
+        ws = self.app.ptrsize
+        q = self.read_int(a & ~(ws - 1) if self.mode == "words" else a, ws)
         if q is not None and app.page_for(q) and imgui.menu_item_simple(f"Follow pointer {q:#x}"):
             self.goto(q)
         imgui.push_id("addr")
@@ -584,7 +592,7 @@ class MemoryView:
     def _keys(self, io) -> None:
         if self.sel is None or self.base is None:
             return
-        step = 8 if self.mode == "qwords" else 1
+        step = self.app.ptrsize if self.mode == "words" else 1
         moves = {
             imgui.Key.left_arrow: -step, imgui.Key.right_arrow: step,
             imgui.Key.up_arrow: -self.bpr, imgui.Key.down_arrow: self.bpr,
@@ -624,15 +632,16 @@ class MemoryView:
         v8 = self.read_int(a, 8)
         if v8 is not None:
             vals.append(f"i64 {v8 - (1 << 64) if v8 >> 63 else v8}")
-            vals.append(f"f64 {struct.unpack('<d', v8.to_bytes(8, 'little'))[0]:.6g}")
+            vals.append(f"f64 {struct.unpack('>d' if app.endian == 'big' else '<d', v8.to_bytes(8, app.endian))[0]:.6g}")
         imgui.push_font(app.mono, app.code_size)
         imgui.text_colored(v4(th.accent), f"{a:#x}")
         imgui.same_line()
         imgui.text_unformatted("  ".join(vals))
-        if v8 is not None and app.page_for(v8):
-            info = app.addr_cache.get(v8)
+        ptr = self.read_int(a, app.ptrsize)
+        if ptr is not None and app.page_for(ptr):
+            info = app.addr_cache.get(ptr)
             if info is None:
-                app.request_addrinfo(v8)
+                app.request_addrinfo(ptr)
             elif info.get("chain"):
                 imgui.text_disabled("→")
                 imgui.same_line()

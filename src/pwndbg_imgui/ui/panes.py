@@ -140,7 +140,7 @@ class BreakpointsPane:
         inline = imgui.get_content_region_avail().x - buttons_w >= imgui.get_font_size() * 10
         imgui.set_next_item_width(-buttons_w if inline else -1)
         entered, self.input = imgui.input_text_with_hint(
-            "##bpin", "main · *0x401136 · file.c:42 · $rip+8 · var", self.input, imgui.InputTextFlags_.enter_returns_true)
+            "##bpin", "main · *0x401136 · file.c:42 · $pc+8 · var", self.input, imgui.InputTextFlags_.enter_returns_true)
         where = self.input.strip()
         for i, (kind, label, tip) in enumerate(self.KINDS):
             if inline or i:

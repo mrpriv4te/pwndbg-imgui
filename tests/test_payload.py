@@ -56,3 +56,13 @@ def test_hexdump():
     assert first.endswith("│AB.0123456789:;<│")
     assert second.startswith("00000010  3d")
     assert hexdump_ansi(b"") == ""
+
+
+def test_eval_payload_follows_the_target():
+    # 32-bit big-endian (e.g. MIPS32): flat() and bare ints pack to 4 bytes, MSB first
+    assert eval_payload("flat([0x41424344, b'x'])", word=4, endian="big") == b"ABCDx"
+    assert eval_payload("0x10", word=4, endian="big") == b"\0\0\0\x10"
+    assert eval_payload("p16(0x4142)", word=4, endian="big") == b"AB"
+    assert eval_payload("u32(b'ABCD')", word=4, endian="big") == b"ABCD"  # round-trips through p32
+    # 32-bit little-endian (ARM, i386)
+    assert eval_payload("flat(1)", word=4) == b"\1\0\0\0"

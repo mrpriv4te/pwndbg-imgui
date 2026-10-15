@@ -99,6 +99,21 @@ works for the attached mode): errors that are normally handled silently, on both
 GUI and the gdb side, are logged with tracebacks to `~/.cache/pwndbg-imgui-debug.log`.
 Please attach that file to bug reports.
 
+### 🦾 Other architectures (ARM, AArch64, MIPS…)
+
+Run the target under qemu-user's gdbserver and attach with a multi-arch gdb (the `pwndbg`
+launcher, or `gdb-multiarch`):
+
+```bash
+qemu-aarch64 -g 1234 ./chall &                     # or qemu-arm, qemu-mips, … (-L sysroot if dynamic)
+pwndbg-imgui --gdb gdb-multiarch -ex 'target remote :1234' ./chall
+```
+
+The panes follow the target: pointer-sized words and byte order in the Memory view and
+payloads (e.g. 4-byte big-endian on MIPS), registers to follow per architecture (`$x0`,
+`$r0`, `$a0`…), cyclic subsequence size. Tested on AArch64, ARM and big-endian MIPS. The
+program's input/output are in qemu's terminal (Program I/O is disabled for remote targets).
+
 ### 🔗 Attach to an existing gdb session
 
 To open the GUI from an already-running gdb (e.g. pwntools' `gdb.debug` / `gdb.attach`),

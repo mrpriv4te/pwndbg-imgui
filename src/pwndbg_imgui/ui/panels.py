@@ -272,7 +272,7 @@ class PanelsMixin:
     def send_io(self, text: str) -> None:
         try:
             if self.io_mode == "python":
-                data = eval_payload(text)
+                data = eval_payload(text, word=self.ptrsize, endian=self.endian)
             else:
                 data = parse_bytes_input(text, self.io_mode)
         except Exception as e:
@@ -448,13 +448,14 @@ class PanelsMixin:
         self.cyclic_len = max(1, min(self.cyclic_len, 100000))
         imgui.same_line()
         imgui.set_next_item_width(imgui.get_font_size() * 5)
-        if imgui.begin_combo("n", str(self.cyclic_n)):
-            for n in (4, 8):
-                if imgui.selectable(str(n), n == self.cyclic_n)[0]:
+        if imgui.begin_combo("n", f"auto ({self.cyclic_size()})" if self.cyclic_n is None else str(self.cyclic_n)):
+            for n in (None, 4, 8):
+                if imgui.selectable(f"auto ({self.ptrsize if self.ptrsize in (4, 8) else 8})" if n is None
+                                    else str(n), n == self.cyclic_n)[0]:
                     self.cyclic_n = n
             imgui.end_combo()
-        imgui.set_item_tooltip("Subsequence size: 4 for 32-bit, 8 for 64-bit targets")
-        pattern = cyclic(self.cyclic_len, self.cyclic_n)
+        imgui.set_item_tooltip("Subsequence size: 4 for 32-bit, 8 for 64-bit targets (auto: the target's)")
+        pattern = cyclic(self.cyclic_len, self.cyclic_size())
         if imgui.button(f"{fa.ICON_FA_COPY} Copy"):
             imgui.set_clipboard_text(pattern.decode())
             self.toast("Pattern copied", "info", 1.2)
@@ -474,8 +475,8 @@ class PanelsMixin:
         imgui.separator_text("Find offset")
         imgui.set_next_item_width(imgui.get_font_size() * 14)
         entered, self.cyclic_value = imgui.input_text_with_hint(
-            "##cyv", "0x6161616c6161616b, 'kaaa', $rsp…", self.cyclic_value, imgui.InputTextFlags_.enter_returns_true)
-        for reg in ("$pc", "$sp", "$bp"):
+            "##cyv", "0x6161616c6161616b, 'kaaa', $sp…", self.cyclic_value, imgui.InputTextFlags_.enter_returns_true)
+        for reg in ("$pc", "$sp", "$fp"):
             imgui.same_line()
             if imgui.button(reg) and self.is_stopped():
                 expr = f"*(unsigned long *){reg}" if reg != "$pc" else "$pc"
@@ -492,17 +493,24 @@ class PanelsMixin:
         if self.cyclic_result:
             imgui.text_colored(v4(th.green if "offset" in self.cyclic_result else th.red), self.cyclic_result)
 
+    def cyclic_size(self) -> int:
+        if self.cyclic_n is not None:
+            return self.cyclic_n
+        return 4 if self.ptrsize == 4 else 8
+
     def _cyclic_lookup(self, value) -> None:
-        n = self.cyclic_n
+        n = self.cyclic_size()
         if isinstance(value, int):
-            needle = (value & ((1 << (8 * n)) - 1)).to_bytes(n, "little")
+            # the bytes as they sit in memory: a target word (or wider if typed that way)
+            width = max(self.ptrsize, (value.bit_length() + 7) // 8)
+            mem = (value & ((1 << (8 * width)) - 1)).to_bytes(width, self.endian)
             shown = f"{value:#x}"
         else:
-            needle = value
+            mem = value
             shown = repr(value)
-        off = cyclic_find(needle, n)
-        if off < 0 and isinstance(value, int) and n == 8:
-            off = cyclic_find((value & 0xFFFFFFFF).to_bytes(4, "little"), 4)
+        off = cyclic_find(mem[:n], n)
+        if off < 0 and n == 8:
+            off = cyclic_find(mem[:4], 4)  # a pattern made with n=4
         self.cyclic_result = f"{shown} found at offset {off} ({off:#x})" if off >= 0 else f"{shown} not found in the pattern"
 
     def prefs_gui(self) -> None:

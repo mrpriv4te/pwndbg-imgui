@@ -17,6 +17,26 @@ SECTION_META = {
 }
 
 
+# Registers worth following in the Memory view, by gdb architecture name (first match wins;
+# "i386:x86-64" before "i386"). Mostly the first argument registers of the calling convention.
+ARG_REGS = [
+    ("i386:x86-64", ("$rdi", "$rsi", "$rdx", "$rax")),
+    ("i386", ("$eax", "$ecx", "$edx", "$esi")),
+    ("aarch64", ("$x0", "$x1", "$x2", "$x30")),
+    ("arm", ("$r0", "$r1", "$r2", "$lr")),
+    ("mips", ("$a0", "$a1", "$a2", "$v0")),
+    ("riscv", ("$a0", "$a1", "$a2", "$ra")),
+    ("powerpc", ("$r3", "$r4", "$r5", "$lr")),
+]
+
+
+def arg_regs(arch: str | None) -> tuple[str, ...]:
+    for prefix, regs in ARG_REGS:
+        if arch and arch.startswith(prefix):
+            return regs
+    return ()
+
+
 AUTOFIT_HEIGHT = {"disasm", "stack", "threads", "code", "backtrace"}
 
 

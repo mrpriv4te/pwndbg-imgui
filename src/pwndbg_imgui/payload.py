@@ -56,11 +56,22 @@ def parse_bytes_input(text: str, mode: str) -> bytes:
     return text.encode("utf-8", errors="surrogateescape")
 
 
-def eval_payload(expr: str) -> bytes:
-    """Evaluate a pwntools-like payload expression for Program I/O."""
+def eval_payload(expr: str, word: int = 8, endian: str = "little") -> bytes:
+    """Evaluate a pwntools-like payload expression for Program I/O.
+
+    `word` (pointer size in bytes) and `endian` describe the target, like pwntools'
+    context: they set what flat() and a bare integer pack to, and p16..p64 / u32 / u64
+    byte order (e.g. word=4, endian="big" for MIPS32 big-endian)."""
+    order = "big" if endian == "big" else "little"
 
     def p(bits):
-        return lambda v: (v & ((1 << bits) - 1)).to_bytes(bits // 8, "little")
+        return lambda v: (v & ((1 << bits) - 1)).to_bytes(bits // 8, order)
+
+    def u(size):
+        return lambda b: int.from_bytes(b[:size].ljust(size, b"\0") if order == "little"
+                                        else b[:size].rjust(size, b"\0"), order)
+
+    pword = p(8 * word)
 
     def flat(*items):
         out = b""
@@ -68,7 +79,7 @@ def eval_payload(expr: str) -> bytes:
             if isinstance(it, (list, tuple)):
                 out += flat(*it)
             elif isinstance(it, int):
-                out += p(64)(it)
+                out += pword(it)
             elif isinstance(it, str):
                 out += it.encode("latin-1")
             else:
@@ -79,15 +90,14 @@ def eval_payload(expr: str) -> bytes:
         "__builtins__": {"bytes": bytes, "bytearray": bytearray, "int": int, "len": len, "range": range,
                          "chr": chr, "ord": ord, "hex": hex, "str": str, "list": list, "sum": sum},
         "p8": p(8), "p16": p(16), "p32": p(32), "p64": p(64), "flat": flat,
-        "u32": lambda b: int.from_bytes(b[:4].ljust(4, b"\0"), "little"),
-        "u64": lambda b: int.from_bytes(b[:8].ljust(8, b"\0"), "little"),
+        "u32": u(4), "u64": u(8),
         "cyclic": lambda n, k=4: cyclic(n, k),
     }
     value = eval(expr, env)  # the user's own payload expression
     if isinstance(value, str):
         return value.encode("latin-1")
     if isinstance(value, int):
-        return p(64)(value)
+        return pword(value)
     if isinstance(value, (list, tuple)):
         return flat(*value)
     return bytes(value)

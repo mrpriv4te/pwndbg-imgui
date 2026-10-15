@@ -477,6 +477,19 @@ class Agent:
         prog = self.gdb.current_progspace()  # None when gdb has no program space yet
         return prog.filename if prog is not None else None
 
+    def target_layout(self) -> tuple[int, str]:
+        """(pointer size in bytes, "little" | "big") of the current target. Also keeps the
+        address mask in sync (32-bit targets: ARM, MIPS32, i386...)."""
+        size, endian = 8, "little"
+        try:
+            size = self.gdb.lookup_type("void").pointer().sizeof
+        except Exception:
+            debug("target_layout: pointer size")
+        if "big endian" in self.quiet("show endian"):
+            endian = "big"
+        self.mask = (1 << (8 * size)) - 1
+        return size, endian
+
     def target_is_remote(self) -> bool:
         return self.remote_target() is not None
 
@@ -513,6 +526,7 @@ class Agent:
                     st["func"] = frame.name()
                     st["level"] = frame.level()
                     st["arch"] = frame.architecture().name()
+                    st["ptrsize"], st["endian"] = self.target_layout()
                     sal = frame.find_sal()
                     if sal.symtab is not None:
                         st["src"] = sal.symtab.fullname()

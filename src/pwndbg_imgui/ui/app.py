@@ -135,7 +135,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.cmd_selected = None
         self.cfg_filter = ""
         self.cyclic_len = 200
-        self.cyclic_n = 8
+        self.cyclic_n: int | None = None  # None: the target's pointer size (see cyclic_size)
         self.cyclic_value = ""
         self.cyclic_result = ""
         self.palette_open = False
@@ -148,7 +148,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
 
     def _section_hint(self, name: str) -> str:
         if name == "expressions":
-            return "No watch expressions. Add one above (e.g. $rsp+8, *(long*)$rdi, or a command like `x/8gx $sp`)."
+            return "No watch expressions. Add one above (e.g. $sp+8, *(long*)$sp, or a command like `x/8gx $sp`)."
         if not self.is_stopped():
             return "Waiting for the program to stop…"
         if name == "code":
@@ -163,6 +163,15 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
 
     def is_stopped(self) -> bool:
         return self.is_alive() and not self.state.get("running")
+
+    @property
+    def ptrsize(self) -> int:
+        """Pointer size of the target, in bytes (8 until the agent reports it)."""
+        return int(self.state.get("ptrsize") or 8)
+
+    @property
+    def endian(self) -> str:
+        return "big" if self.state.get("endian") == "big" else "little"
 
     def is_running(self) -> bool:
         return self.is_alive() and bool(self.state.get("running"))
