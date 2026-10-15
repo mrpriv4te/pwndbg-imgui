@@ -562,3 +562,91 @@ class ThreadsPane(StopRefreshed):
                 app.backtrace_pane.invalidate()  # another thread, another call stack
 
             app.exec(f"thread {num}", quiet=True, cb=switched)
+
+
+class RegistersBar:
+    """Controls above the Registers pane for pwndbg's register-display parameters: compact
+    mode, its column count, the flags and return-address registers. Changes are applied with
+    `set`, redraw the context and are remembered like the Config pane's."""
+
+    PARAMS = ("show-compact-regs", "show-compact-regs-columns", "show-flags", "show-retaddr-reg")
+    MODES = (("off", "one register per line"), ("on", "columns, grouped like the plain view"),
+             ("very", "columns, packed as tightly as possible"), ("hardcut", "columns, long values cut"))
+
+    def __init__(self, app: App) -> None:
+        self.app = app
+        self.values: dict | None = None  # parameter -> value, None until fetched
+        self.pending = False
+        self.fetched_gen = -1
+
+    def fetch(self) -> None:
+        app = self.app
+        if not app.rpc or self.pending:
+            return
+        self.pending = True
+        self.fetched_gen = app.dirty_gen
+
+        def done(values) -> None:
+            self.pending = False
+            self.values = values or {}
+
+        def fail(_err) -> None:
+            self.pending = False
+            self.values = {}
+
+        app.rpc.request("params", done, fail, names=list(self.PARAMS))
+
+    def set(self, name: str, value) -> None:
+        app = self.app
+        arg = "on" if value is True else "off" if value is False else str(value)
+        if self.values is not None:
+            self.values[name] = value
+        app.persist_pwndbg_param(name, arg)
+
+        def applied(_out) -> None:
+            self.fetch()
+            if app.config is not None:  # keep the Config pane's markers in step
+                app.reload_config()
+
+        app.exec(f"set {name} {arg}", quiet=True, cb=applied)  # refreshes the context
+
+    def gui(self) -> None:
+        app = self.app
+        if self.values is None or (app.is_stopped() and self.fetched_gen != app.dirty_gen):
+            self.fetch()  # at first, then once per stop (they may change from the console)
+        if not self.values or not app.info.get("pwndbg"):
+            return
+        v = self.values
+        mode = str(v.get("show-compact-regs", "off"))
+        imgui.align_text_to_frame_padding()
+        imgui.text_disabled("Compact")
+        imgui.same_line()
+        imgui.set_next_item_width(imgui.calc_text_size("hardcut").x + imgui.get_frame_height() + 12)
+        if imgui.begin_combo("##regcompact", mode):
+            for name, desc in self.MODES:
+                if imgui.selectable(name, name == mode)[0] and name != mode:
+                    self.set("show-compact-regs", name)
+                imgui.set_item_tooltip(desc)
+            imgui.end_combo()
+        imgui.set_item_tooltip("pwndbg's show-compact-regs: registers in columns")
+        imgui.same_line()
+        imgui.begin_disabled(mode == "off")
+        imgui.text_disabled("Columns")
+        imgui.same_line()
+        imgui.set_next_item_width(imgui.get_font_size() * 5.5)
+        cols = int(v.get("show-compact-regs-columns", 2))
+        changed, cols_new = imgui.input_int("##regcols", cols, 1)
+        if changed and 0 <= cols_new <= 8 and cols_new != cols:
+            self.set("show-compact-regs-columns", cols_new)
+        imgui.set_item_tooltip("show-compact-regs-columns (0: as many as fit)")
+        imgui.end_disabled()
+        imgui.same_line(0, 14)
+        changed, flags = imgui.checkbox("Flags##regflags", bool(v.get("show-flags")))
+        if changed:
+            self.set("show-flags", flags)
+        imgui.set_item_tooltip("show-flags: show the flags register (EFLAGS, CPSR...)")
+        imgui.same_line()
+        changed, retaddr = imgui.checkbox("Return address##regret", bool(v.get("show-retaddr-reg")))
+        if changed:
+            self.set("show-retaddr-reg", retaddr)
+        imgui.set_item_tooltip("show-retaddr-reg: show the return address register (LR, RA...)")

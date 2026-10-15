@@ -30,6 +30,8 @@ class PanelsMixin:
                 if not table.unavailable():  # else: pwndbg's own text, below
                     table.gui()
                     return
+            if name == "regs":
+                self.registers_bar.gui()
             if name == "expressions":
                 self._watch_bar()
             elif name == "heap_tracker":
@@ -472,6 +474,7 @@ class PanelsMixin:
         """Fetch values again (after a change: the modified markers come from gdb)."""
         if self.rpc:
             self.rpc.request("config", self._set_config, self.error_toast)
+            self.registers_bar.fetch()  # its controls show some of the same parameters
 
     def reset_config_param(self, p) -> None:
         self.exec(f"set {p['name']} {p['reset']}", quiet=True, cb=lambda _o: self.reload_config())

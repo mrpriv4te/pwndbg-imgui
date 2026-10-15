@@ -24,7 +24,7 @@ from .appearance import AppearanceMixin
 from .chrome import ChromeMixin
 from .native import NativeWindow, capsule_pointer
 from .panels import PanelsMixin
-from .panes import BacktracePane, BreakpointsPane, HeapPane, ThreadsPane, VmmapPane
+from .panes import BacktracePane, BreakpointsPane, HeapPane, RegistersBar, ThreadsPane, VmmapPane
 from .sections import SectionsMixin
 from .views import CmdView, DecompView, MemoryView
 from .widgets import TableCard, TextView, ansi_inline, v4
@@ -120,6 +120,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.keys_card: TableCard | None = None
         self.backtrace_pane = BacktracePane(self)
         self.threads_pane = ThreadsPane(self)
+        self.registers_bar = RegistersBar(self)
         self.cmd_views: list[CmdView] = []
         self.views_to_add: list[CmdView] = []
 

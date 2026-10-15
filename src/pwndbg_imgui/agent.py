@@ -915,6 +915,14 @@ class Agent:
             )
         return out
 
+    def op_params(self, names: list) -> dict:
+        """Current values of a few pwndbg parameters, by their gdb name (show-flags...)."""
+        if self.pwndbg is None:
+            return {}
+        wanted = set(names)
+        return {p.name: p.value for p in self.pwndbg.config.params.values()
+                if p.name in wanted and isinstance(p.value, (bool, int, str))}
+
     def op_config(self) -> list:
         if self.pwndbg is None:
             return []
