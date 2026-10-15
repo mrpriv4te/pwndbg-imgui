@@ -1,9 +1,13 @@
 # tools/guitest.py steps for heapdemo (see ../README.md): the Heap view shows two tcache
-# chunks, one unsorted chunk and the top chunk at heap_snapshot().
+# chunks, one unsorted chunk and the top chunk at heap_snapshot(); its Memory tab
+# (vis-heap-chunks) drawn from the unsorted chunk.
 2   cmd   b heap_snapshot
 3   cmd   run
 5   py    [setattr(d, "is_visible", True) or setattr(d, "focus_window_at_next_frame", True) for d in hello_imgui.get_runner_params().docking_params.dockable_windows if d.label.endswith(" Heap")]
 8   py    d = app.heap_pane.data; assert d, app.heap_pane.error; s = [c["bin"] for c in d["chunks"]]; assert s.count("tcachebins") == 2 and s.count("unsortedbin") == 1 and s[-1] == "top", s
 8.5 py    b = {x["type"]: x for x in app.heap_pane.data["bins"]}; assert b["tcachebins"]["count"] == 2 and b["tcachebins"]["key"] == 0x30, b
 9   shot  heap
-10  quit
+9.5 py    h = app.heap_pane; h.selected = [c["addr"] for c in h.data["chunks"] if c["bin"] == "unsortedbin"][0]; h.vis_count = 2; h.show_memory_tab = True
+11  py    t = app.heap_pane.vis_term.plain(); assert "unsortedbin" in t and f"{app.heap_pane.selected:x}" in t.splitlines()[0], t[:300]
+11.5 shot heap-memory
+12  quit

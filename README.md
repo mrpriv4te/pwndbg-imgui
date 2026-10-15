@@ -199,8 +199,9 @@ a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
   <kbd>Ctrl</kbd>+<kbd>C</kbd> over a row.
 - **🧱 Heap** (glibc) — every chunk of the current arena with its size, flags and state
   (in use, tcache, fastbin, unsorted, small/large bin, top), and the non-empty bins with their
-  chains; addresses open in Memory. Built on pwndbg's heap model, refreshed at each stop
-  (**View → Heap**).
+  chains; addresses open in Memory. A **Memory** tab draws them with pwndbg's
+  `vis-heap-chunks`, from the selected chunk. Built on pwndbg's heap model, refreshed at
+  each stop (**View → Heap**).
 - **🧰 Tools** — **VMMap**, a **command browser** (built-in help), a **pwndbg config editor**
   (remembered across runs), **live command views** refreshed on every stop (`heap`, `bins`,
   `vis_heap_chunks`, `got`, `telescope`…), a **cyclic pattern tool** (generate, send, find an

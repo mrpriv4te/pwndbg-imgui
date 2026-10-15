@@ -24,6 +24,14 @@ Below the chunks: the tcache 0x30 bin (count 2) and the unsorted bin with their 
 an address to open it in the Memory view. The libc may add chunks of its own (e.g. stdio
 buffers), and the exact list depends on the glibc version.
 
+## Memory tab (vis-heap-chunks)
+
+The **Memory** tab draws the same chunks as pwndbg's `vis-heap-chunks`: the words of
+each chunk, colored per chunk, with the bins annotated (`<-- tcachebins[0x30][0/2]`,
+`<-- unsortedbin[all][0]`…). With a chunk selected in the **Chunks** tab (or right-click it →
+*Visualize from here*), it starts at that chunk. Options: how many chunks (0 = all), don't
+collapse repeated rows, don't truncate large chunks.
+
 ## Not glibc
 
 `make heap-musl` builds the same program statically against musl (with zig). The Heap view

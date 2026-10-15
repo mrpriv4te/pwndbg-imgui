@@ -11,7 +11,8 @@ from typing import TYPE_CHECKING
 
 from imgui_bundle import imgui
 from imgui_bundle import icons_fontawesome_6 as fa
-from .widgets import TableCard, buttons_width, v4
+from ..term import Term
+from .widgets import TableCard, TextView, buttons_width, v4
 
 if TYPE_CHECKING:
     from .app import App
@@ -214,6 +215,17 @@ class HeapPane:
         self.fetched_gen = -1  # App.dirty_gen of the data shown
         self.pending = False
         self.selected: int | None = None
+        # the Memory tab: pwndbg's vis-heap-chunks, from the selected chunk if any
+        self.vis_term = Term(max_lines=50000)
+        self.vis_view = TextView(app, self.vis_term, "visheap", follow="none",
+                                 empty_hint="Run the program to a point where the heap exists.")
+        self.vis_count = 10  # chunks to draw; 0: all of them
+        self.vis_from_selected = True
+        self.vis_no_skip = False
+        self.vis_no_truncate = False
+        self.vis_key = None  # (dirty_gen, command) of the output shown
+        self.vis_pending = False
+        self.show_memory_tab = False  # select the Memory tab at the next frame
         self.chunks_card = TableCard(app, "##heapchunks", ["Chunk", "Size", "Flags", ("State", STRETCH)], TABLE_FLAGS)
         self.bins_card = TableCard(app, "##heapbins", ["Bin", "Count", ("Chain (fd)", STRETCH)], TABLE_FLAGS)
 
@@ -266,6 +278,20 @@ class HeapPane:
         free = sum(1 for c in chunks if c["bin"] not in (None, "top"))
         imgui.text_disabled(f"{'main_arena' if d['main'] else 'arena'} {d['arena']:#x} · {len(chunks)} chunks"
                             f" · {free} free" + (" · truncated" if d["truncated"] else ""))
+        if not imgui.begin_tab_bar("##heaptabs"):
+            return
+        if imgui.begin_tab_item(f"{fa.ICON_FA_TABLE_LIST} Chunks##heapt")[0]:
+            self._chunks_tab(d, chunks)
+            imgui.end_tab_item()
+        memory_flags = imgui.TabItemFlags_.set_selected if self.show_memory_tab else 0
+        self.show_memory_tab = False
+        if imgui.begin_tab_item(f"{fa.ICON_FA_MEMORY} Memory (vis-heap-chunks)##heapm", None, memory_flags)[0]:
+            self._memory_tab()
+            imgui.end_tab_item()
+        imgui.end_tab_bar()
+
+    def _chunks_tab(self, d: dict, chunks: list) -> None:
+        app = self.app
         imgui.push_font(app.mono, app.code_size)
         avail = imgui.get_content_region_avail().y
         style = imgui.get_style()
@@ -274,6 +300,58 @@ class HeapPane:
         self._chunks(chunks, max(60.0, avail - bins_h - style.item_spacing.y))
         self._bins(d["bins"], {c["addr"] for c in chunks})
         imgui.pop_font()
+
+    def vis_command(self) -> str:
+        parts = ["vis-heap-chunks"]
+        if self.vis_count:
+            parts.append(str(self.vis_count))
+            if self.vis_from_selected and self.selected is not None:
+                parts.append(f"{self.selected:#x}")
+        else:
+            parts.append("--all-chunks")
+        if self.vis_no_skip:
+            parts.append("--no-skip")
+        if self.vis_no_truncate:
+            parts.append("--no-truncate")
+        return " ".join(parts)
+
+    def _memory_tab(self) -> None:
+        app = self.app
+        imgui.align_text_to_frame_padding()
+        imgui.text_disabled("Chunks")
+        imgui.same_line()
+        imgui.set_next_item_width(imgui.get_font_size() * 6)
+        _, self.vis_count = imgui.input_int("##viscount", self.vis_count, 5)
+        self.vis_count = max(0, min(self.vis_count, 10000))
+        imgui.set_item_tooltip("How many chunks to draw (0: all of them)")
+        imgui.same_line()
+        imgui.begin_disabled(self.vis_count == 0)
+        sel = f"{self.selected:#x}" if self.selected is not None else "the selected chunk"
+        _, self.vis_from_selected = imgui.checkbox(f"From {sel}##visfrom", self.vis_from_selected)
+        imgui.set_item_tooltip("Start at the chunk selected in the Chunks tab (else the heap's first one)")
+        imgui.end_disabled()
+        imgui.same_line()
+        _, self.vis_no_skip = imgui.checkbox("No skip##visskip", self.vis_no_skip)
+        imgui.set_item_tooltip("Show repeated rows instead of collapsing them (--no-skip)")
+        imgui.same_line()
+        _, self.vis_no_truncate = imgui.checkbox("Whole chunks##vistrunc", self.vis_no_truncate)
+        imgui.set_item_tooltip("Don't truncate large chunks (--no-truncate)")
+        cmd = self.vis_command()
+        key = (app.dirty_gen, cmd)
+        if app.is_stopped() and key != self.vis_key and not self.vis_pending and app.rpc:
+            self.vis_pending = True
+            self.vis_key = key
+
+            def done(out) -> None:
+                self.vis_pending = False
+                self.vis_term.set_text(out or "(no output)\n")
+
+            def fail(err) -> None:
+                self.vis_pending = False
+                self.vis_term.set_text(f"\x1b[31m{err}\x1b[0m\n")
+
+            app.rpc.request("exec", done, fail, cmd=cmd)
+        self.vis_view.render()
 
     def _chunks(self, chunks: list, max_height: float) -> None:
         app = self.app
@@ -302,6 +380,10 @@ class HeapPane:
                 imgui.pop_font()
                 if imgui.menu_item_simple(f"{fa.ICON_FA_MEMORY}  Open in Memory"):
                     app.open_memory(addr)
+                if imgui.menu_item_simple(f"{fa.ICON_FA_CUBES_STACKED}  Visualize from here (vis-heap-chunks)"):
+                    self.selected = addr
+                    self.vis_from_selected = True
+                    self.show_memory_tab = True
                 imgui.separator()
                 card.copy_menu(row)
                 imgui.push_font(app.mono, app.code_size)
