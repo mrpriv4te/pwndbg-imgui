@@ -213,6 +213,7 @@ class DecompView:
             self.connect()
 
         color = th.green if connected else th.dim
+        imgui.align_text_to_frame_padding()  # line the status dot/text up with the buttons
         imgui.text_colored(v4(color), fa.ICON_FA_CIRCLE)
         imgui.same_line()
         if connected:
