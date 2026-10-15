@@ -10,6 +10,7 @@ from imgui_bundle import icons_fontawesome_6 as fa
 from ..payload import cyclic, cyclic_find, eval_payload, hexdump_ansi, parse_bytes_input
 from ..term import ECHO, strip_ansi
 from ..theme import THEMES
+from .panes import BreakpointsPane, VmmapPane
 from .views import DecompView
 from .widgets import buttons_width, combo_width, help_marker, v4
 
@@ -291,150 +292,6 @@ class PanelsMixin:
     def memory_gui(self) -> None:
         self.memory.gui()
 
-    def vmmap_gui(self) -> None:
-        th = self.theme
-        imgui.set_next_item_width(-buttons_width(fa.ICON_FA_ARROWS_ROTATE))
-        _, self.vmmap_filter = imgui.input_text_with_hint("##vmf", f"{fa.ICON_FA_FILTER} filter (name, perms, address)", self.vmmap_filter)
-        imgui.same_line()
-        if imgui.button(f"{fa.ICON_FA_ARROWS_ROTATE}##vmr") and self.is_stopped():
-            self.rpc.request("vmmap", self._set_vmmap)
-        if not self.vmmap:
-            imgui.text_disabled("The memory map appears once the program is stopped.")
-            return
-        flt = self.vmmap_filter.lower().strip()
-        addr_flt = None
-        if flt.startswith("0x"):
-            try:
-                addr_flt = int(flt, 16)
-            except ValueError:
-                pass
-        flags = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.pad_outer_x
-                 | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable | imgui.TableFlags_.sizing_fixed_fit)
-        imgui.push_font(self.mono, self.code_size)
-        if imgui.begin_table("##vmmap", 6, flags):
-            imgui.table_setup_scroll_freeze(0, 1)
-            for col in ("Start", "End", "Size", "Perm", "Offset"):
-                imgui.table_setup_column(col)
-            imgui.table_setup_column("File", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_headers_row()
-            for i, p in enumerate(self.vmmap):
-                start, end, perm, off, objfile, kind = p
-                if addr_flt is not None:
-                    if not start <= addr_flt < end:
-                        continue
-                elif flt and flt not in objfile.lower() and flt not in perm and flt not in kind:
-                    continue
-                imgui.table_next_row()
-                imgui.table_next_column()
-                imgui.push_style_color(imgui.Col_.text, v4(th.kind_color(kind)))
-                clicked, _ = imgui.selectable(
-                    f"{start:#x}##vm{i}", False,
-                    imgui.SelectableFlags_.span_all_columns | imgui.SelectableFlags_.allow_double_click)
-                if clicked and imgui.is_mouse_double_clicked(0):
-                    self.open_memory(start)
-                if imgui.begin_popup_context_item(f"##vmctx{i}"):
-                    imgui.pop_font()
-                    if imgui.menu_item_simple(f"{fa.ICON_FA_MEMORY}  View memory"):
-                        self.open_memory(start)
-                    if imgui.menu_item_simple(f"{fa.ICON_FA_LAYER_GROUP}  Telescope start"):
-                        self.open_cmd_view(f"telescope {start:#x} 32")
-                    if imgui.menu_item_simple(f"{fa.ICON_FA_COPY}  Copy start"):
-                        imgui.set_clipboard_text(f"{start:#x}")
-                    if imgui.menu_item_simple(f"{fa.ICON_FA_COPY}  Copy end"):
-                        imgui.set_clipboard_text(f"{end:#x}")
-                    if objfile and imgui.menu_item_simple(f"{fa.ICON_FA_COPY}  Copy path"):
-                        imgui.set_clipboard_text(objfile)
-                    imgui.push_font(self.mono, self.code_size)
-                    imgui.end_popup()
-                imgui.table_next_column()
-                imgui.text_unformatted(f"{end:#x}")
-                imgui.table_next_column()
-                imgui.text_unformatted(f"{end - start:#x}")
-                imgui.table_next_column()
-                imgui.text_unformatted(perm)
-                imgui.table_next_column()
-                imgui.text_unformatted(f"{off:#x}")
-                imgui.table_next_column()
-                imgui.text_unformatted(os.path.basename(objfile) if objfile.startswith("/") else objfile)
-                if objfile.startswith("/"):
-                    imgui.set_item_tooltip(objfile)
-                imgui.pop_style_color()
-            imgui.end_table()
-        imgui.pop_font()
-
-    def breakpoints_gui(self) -> None:
-        th = self.theme
-        buttons = (("break", "Break", "Software breakpoint"), ("tbreak", "Temp", "Temporary breakpoint"),
-                   ("watch", "Watch", "Write watchpoint"), ("rwatch", "RWatch", "Read watchpoint"))
-        buttons_w = buttons_width(*(b[1] for b in buttons))
-        # keep the buttons on the input's line when it leaves the input usable room, else wrap them
-        inline = imgui.get_content_region_avail().x - buttons_w >= imgui.get_font_size() * 10
-        imgui.set_next_item_width(-buttons_w if inline else -1)
-        entered, self.bp_input = imgui.input_text_with_hint(
-            "##bpin", "main · *0x401136 · file.c:42 · $rip+8 · var", self.bp_input, imgui.InputTextFlags_.enter_returns_true)
-        where = self.bp_input.strip()
-        for i, (kind, label, tip) in enumerate(buttons):
-            if inline or i:
-                imgui.same_line()
-            if (imgui.button(f"{label}##bp") or (entered and kind == "break")) and where:
-                self.exec(f"{kind} {where}", refresh=False)
-                self.bp_input = ""
-            imgui.set_item_tooltip(tip)
-        if not self.bps:
-            imgui.text_disabled("No breakpoints. Click the gutter of Disassembly/Source, or add one above.")
-            return
-        flags = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.pad_outer_x
-                 | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable | imgui.TableFlags_.sizing_fixed_fit)
-        if imgui.begin_table("##bps", 7, flags):
-            imgui.table_setup_scroll_freeze(0, 1)
-            for col in ("", "#", "Type", "Where", "Address", "Hits"):
-                imgui.table_setup_column(col)
-            imgui.table_setup_column("Condition", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_headers_row()
-            for b in self.bps:
-                num = b["num"]
-                imgui.table_next_row()
-                imgui.table_next_column()
-                changed, en = imgui.checkbox(f"##en{num}", b["enabled"])
-                if changed:
-                    self.rpc.request("bp_update", None, self.error_toast, num=num, enabled=en)
-                imgui.same_line()
-                if imgui.small_button(f"{fa.ICON_FA_TRASH}##del{num}"):
-                    self.rpc.request("bp_delete", None, self.error_toast, num=num)
-                imgui.table_next_column()
-                imgui.text_colored(v4(th.red if b["enabled"] else th.dim), str(num))
-                imgui.table_next_column()
-                imgui.text_unformatted(b.get("type", "?") + (" (temp)" if b.get("temp") else ""))
-                imgui.table_next_column()
-                imgui.text_unformatted(b.get("location") or b.get("expr") or "")
-                if b.get("pending"):
-                    imgui.same_line()
-                    imgui.text_disabled("(pending)")
-                imgui.table_next_column()
-                addrs = [loc["addr"] for loc in b.get("locs", []) if loc.get("addr") is not None]
-                if addrs:
-                    imgui.push_font(self.mono, self.code_size)
-                    if imgui.text_link(f"{addrs[0]:#x}##bpa{num}"):
-                        self.open_memory(addrs[0])
-                    imgui.pop_font()
-                    if len(addrs) > 1:
-                        imgui.same_line()
-                        imgui.text_disabled(f"+{len(addrs) - 1}")
-                imgui.table_next_column()
-                imgui.text_unformatted(str(b.get("hits", 0)))
-                imgui.table_next_column()
-                key = f"cond{num}"
-                if key not in self.config_edit:
-                    self.config_edit[key] = b.get("cond") or ""
-                imgui.set_next_item_width(-1)
-                entered, self.config_edit[key] = imgui.input_text_with_hint(
-                    f"##{key}", "condition (Enter)", self.config_edit[key], imgui.InputTextFlags_.enter_returns_true)
-                if entered:
-                    self.rpc.request("bp_update", None, self.error_toast, num=num, cond=self.config_edit[key])
-                elif not imgui.is_item_active():
-                    self.config_edit[key] = b.get("cond") or ""
-            imgui.end_table()
-
     def commands_gui(self) -> None:
         th = self.theme
         if self.commands is None:
@@ -702,8 +559,8 @@ class PanelsMixin:
             (f"{fa.ICON_FA_KEYBOARD} Program I/O", self.io_gui, "Bottom", True),
             (f"{fa.ICON_FA_MEMORY} Memory", self.memory_gui, "MainDockSpace", True),
             (f"{fa.ICON_FA_DRAGON} {DecompView.LABEL}", self.decomp.gui, "MainDockSpace", True),
-            (f"{fa.ICON_FA_MAP} VMMap", self.vmmap_gui, "RightBottom", True),
-            (f"{fa.ICON_FA_CIRCLE_DOT} Breakpoints", self.breakpoints_gui, "RightBottom", True),
+            (VmmapPane.LABEL, self.vmmap_pane.gui, "RightBottom", True),
+            (BreakpointsPane.LABEL, self.breakpoints_pane.gui, "RightBottom", True),
             (f"{fa.ICON_FA_BOOK} Commands", self.commands_gui, "MainDockSpace", False),
             (f"{fa.ICON_FA_SLIDERS} pwndbg Config", self.config_gui, "MainDockSpace", False),
             (f"{fa.ICON_FA_HASHTAG} Pattern (cyclic)", self.cyclic_gui, "RightBottom", False),

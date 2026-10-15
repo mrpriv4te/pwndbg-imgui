@@ -60,3 +60,78 @@ def test_per_binary_settings_keyed_by_absolute_path(tmp_path, monkeypatch):
     s.binary("./chall")["args"] = "AAAA"
     assert s.binary(os.path.join(tmp_path, "chall"))["args"] == "AAAA"
     assert s.binary(None) is s.binary(None)
+
+
+# -- two instances (two GUI windows) saving the same file ----------------------------
+
+def test_two_windows_keep_each_others_changes():
+    a, b = Settings(), Settings()
+    a["theme"] = "A theme"
+    a.save()
+    b["ui_size"] = 20.0
+    b.save()  # must not revert a's theme with the value b loaded at startup
+    s = Settings()
+    assert (s["theme"], s["ui_size"]) == ("A theme", 20.0)
+
+
+def test_same_key_last_writer_wins():
+    a, b = Settings(), Settings()
+    a["theme"] = "A"
+    a.save()
+    b["theme"] = "B"
+    b.save()
+    assert Settings()["theme"] == "B"
+
+
+def test_nested_dicts_merge_per_key():
+    a, b = Settings(), Settings()
+    a["pwndbg_config"]["context-stack-lines"] = 20
+    a.binary("/x/chall")["args"] = "AAAA"
+    a.save()
+    b["pwndbg_config"]["show-flags"] = True
+    b.binary("/x/chall")["bps"] = [{"kind": "break", "where": "main"}]
+    b.save()
+    s = Settings()
+    assert s["pwndbg_config"] == {"context-stack-lines": 20, "show-flags": True}
+    assert s.binary("/x/chall") == {"args": "AAAA", "bps": [{"kind": "break", "where": "main"}]}
+
+
+def test_deleting_a_key_is_saved():
+    s = Settings()
+    s["pwndbg_config"].update({"a": 1, "b": 2})
+    s.save()
+    s = Settings()
+    s["pwndbg_config"].clear()  # "clear saved config" in the Config pane
+    s.save()
+    assert Settings()["pwndbg_config"] == {}
+
+
+def test_histories_from_both_windows_are_kept():
+    a, b = Settings(), Settings()
+    a["console_history"] = a["console_history"] + ["a1", "a2"]
+    a.save()
+    b["console_history"] = b["console_history"] + ["b1"]
+    b.save()
+    a["console_history"] = a["console_history"] + ["a3"]  # appended after a's first save
+    a.save()
+    assert Settings()["console_history"] == ["a1", "a2", "b1", "a3"]
+
+
+def test_save_without_changes_does_not_write(config_home):
+    s = Settings()
+    s.save()
+    assert not (config_home / "settings.json").exists()
+    s["theme"] = "X"
+    s.save()
+    mtime = os.stat(config_home / "settings.json").st_mtime_ns
+    s.save()
+    assert os.stat(config_home / "settings.json").st_mtime_ns == mtime
+
+
+def test_unknown_keys_from_a_newer_version_are_kept(config_home):
+    config_home.mkdir(parents=True, exist_ok=True)
+    (config_home / "settings.json").write_text(json.dumps({"future_option": 1}))
+    s = Settings()
+    s["theme"] = "X"
+    s.save()
+    assert json.loads((config_home / "settings.json").read_text())["future_option"] == 1

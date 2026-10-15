@@ -24,6 +24,7 @@ from .appearance import AppearanceMixin
 from .chrome import ChromeMixin
 from .native import NativeWindow
 from .panels import PanelsMixin
+from .panes import BreakpointsPane, VmmapPane
 from .sections import SectionsMixin
 from .views import CmdView, DecompView, MemoryView
 from .widgets import TextView, ansi_inline, v4
@@ -90,6 +91,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.layout_pending = (None, 0.0)
         self.exiting = False
         self.exit_signal = 0  # SIGINT/SIGTERM received: close at the next frame
+        self.last_persist = time.monotonic()
         self.section_extra: dict[str, int] = {"stack": 0}
         self.load_more_t = 0.0
         self.gdb_idle = False  # True while gdb sits at its prompt
@@ -109,6 +111,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.io_hex_view = TextView(self, self.io_hex_term, "iohex", follow="bottom")
         self.memory = MemoryView(self)
         self.decomp = DecompView(self)
+        self.vmmap_pane = VmmapPane(self)
+        self.breakpoints_pane = BreakpointsPane(self)
         self.cmd_views: list[CmdView] = []
         self.views_to_add: list[CmdView] = []
 
@@ -127,9 +131,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.io_view_mode = "terminal"
         # misc tool state
         self.goto_input = ""
-        self.bp_input = ""
         self.watch_input = ""
-        self.vmmap_filter = ""
         self.cmd_filter = ""
         self.cmd_selected = None
         self.cfg_filter = ""
@@ -386,6 +388,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
     # pwndbg config persistence ----------------------------------------------
     # These are driven by the GUI (layout, context routing), so persisting the
     # user's value would fight that logic. Everything else is remembered.
+    PERSIST_EVERY = 60.0  # seconds between automatic settings saves
+
     PWNDBG_CONFIG_DENY = {"context-sections", "context-output", "context-reserve-lines"}
 
     def persist_pwndbg_param(self, name: str, value: str) -> None:
@@ -613,6 +617,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
             hello_imgui.get_runner_params().app_shall_exit = True
         if self.exit_signal:
             hello_imgui.get_runner_params().app_shall_exit = True
+        if time.monotonic() - self.last_persist > self.PERSIST_EVERY and not self.exiting:
+            self.persist()
         if self._restore_layout_ini is not None:
             imgui.load_ini_settings_from_memory(self._restore_layout_ini)
             self._restore_layout_ini = None
@@ -657,6 +663,12 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
 
     def before_exit(self) -> None:
         self.exiting = True
+        self.persist()
+
+    def persist(self) -> None:
+        """Hand the session's state to the settings and write them. Also runs every
+        PERSIST_EVERY seconds, so a crash or a forced quit loses little."""
+        self.last_persist = time.monotonic()
         self.save_breakpoints()
         st = self.settings
         st["views"] = [{"cmd": v.cmd, "auto": v.auto} for v in self.cmd_views]
