@@ -98,6 +98,7 @@ class TextView:
         self.keep_scroll_once = False
         self.lockable = False  # show a lock toggle that freezes the scroll position
         self.locked = False
+        self.row_tint = None  # optional (line text) -> [(col0, col1 or None = row end, ImU32)] to tint
 
     # -- selection helpers ----------------------------------------------
     def selection(self):
@@ -299,6 +300,14 @@ class TextView:
                         y = oy + i * line_h
                         dl.add_rect_filled(ImVec2(win_pos.x, y), ImVec2(clip_r, y + line_h), u32(th.accent, 0.10))
                         dl.add_rect_filled(ImVec2(win_pos.x, y), ImVec2(win_pos.x + 2, y + line_h), u32(th.accent, 0.9))
+
+            if self.row_tint is not None:
+                for i in range(first, last):
+                    y = oy + i * line_h
+                    for c0, c1, tint in self.row_tint(lines[i].text) or ():
+                        x0 = win_pos.x if c0 == 0 else tx + (c0 - 0.5) * char_w
+                        x1 = clip_r if c1 is None else tx + (c1 + 0.5) * char_w
+                        dl.add_rect_filled(ImVec2(x0, y), ImVec2(x1, y + line_h), tint)
 
             # search matches
             if self.search_open and self.search_text:

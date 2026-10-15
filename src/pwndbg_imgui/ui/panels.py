@@ -170,10 +170,14 @@ class PanelsMixin:
             if self.attached:
                 imgui.text_disabled("This GUI is attached to an existing gdb session (init-pwndbg-imgui): the program's "
                                     "input/output belong to whoever started it (e.g. your pwntools script).")
-            elif self.io is not None and self.state.get("remote"):
-                imgui.text_disabled("The target is remote (gdbserver): the program's input/output go through the "
-                                    "remote side, not this window. This is the case with pwntools' gdb.debug — "
-                                    "interact with the program in the script that launched it.")
+            elif self.io is not None:  # io_is_external(): a remote target
+                where = self.state.get("remote_addr") or self.info.get("remote_addr") or "gdbserver"
+                imgui.text_colored(v4(th.accent), f"{fa.ICON_FA_CIRCLE_INFO}  Remote target ({where})")
+                imgui.text_disabled("The program runs under gdbserver, so its input/output don't go through gdb "
+                                    "and can't be shown here. Talk to it where it was started:")
+                imgui.bullet_text("pwntools (gdb.debug, exploit.py -d ui): from the script, "
+                                  "e.g. io.sendline(...) / io.interactive()")
+                imgui.bullet_text("gdbserver started by hand: in the terminal where gdbserver runs")
             else:
                 imgui.text_disabled("Program I/O is disabled (--no-io): the program shares the gdb console.")
             imgui.pop_text_wrap_pos()

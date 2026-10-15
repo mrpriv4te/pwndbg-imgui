@@ -8,7 +8,9 @@ import time
 
 from imgui_bundle import imgui
 from imgui_bundle import icons_fontawesome_6 as fa
+from ..registers import register_cells
 from ..term import strip_ansi
+from ..theme import u32
 from .views import CODE_LINE_RE, DISASM_ADDR_RE, FRAME_RE, REG_WORD_RE, THREAD_RE, WATCH_RE
 
 
@@ -30,6 +32,7 @@ class SectionsMixin:
         thr = self.sections["threads"]["view"]
         thr.on_dblclick = lambda i, t: self._select_thread(t)
         self.sections["regs"]["view"].menu = self._regs_menu
+        self.sections["regs"]["view"].row_tint = self._regs_tint
         self.sections["stack"]["view"].on_scroll_end = lambda: self.load_more("stack")
         for name in ("regs", "stack", "backtrace", "args", "expressions", "threads", "heap_tracker", "last_signal"):
             self.sections[name]["view"].lockable = True
@@ -117,6 +120,18 @@ class SectionsMixin:
                                   self.is_stopped() and m.group(1) != "0"):
             self.exec(f"frame {int(m.group(1)) - 1}", refresh=False, quiet=True, cb=lambda _o: self.send_console("finish"))
         return True
+
+    def _regs_tint(self, text: str):
+        """Tint the registers that changed since the previous stop: the whole row with one
+        register per line, only that register's cell with show-compact-regs columns."""
+        changed = self.state.get("changed_regs")
+        if not changed:
+            return None
+        cells = register_cells(text, self.state.get("reg_names") or changed)
+        tint = u32(self.theme.red, 0.14)
+        if len(cells) == 1:
+            return [(0, None, tint)] if cells[0][2] in changed else None
+        return [(s, e, tint) for s, e, name in cells if name in changed]
 
     def _regs_menu(self, ctx) -> bool:
         text = strip_ansi(ctx.get("text", ""))

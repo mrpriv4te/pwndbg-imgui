@@ -5,6 +5,9 @@ packages must not leak into pwndbg's), loads pwndbg if needed, redirects every c
 section to the GUI and answers JSON requests over a socketpair inherited from the GUI.
 """
 
+# pyright: reportMissingImports=false, reportMissingModuleSource=false
+# (gdb and pwndbg only exist inside gdb's own Python)
+
 from __future__ import annotations
 
 import functools
@@ -13,6 +16,7 @@ import os
 import socket
 import sys
 import threading
+from typing import Any
 
 APP_NAME = "pwndbg-imgui"
 
@@ -113,7 +117,7 @@ class Agent:
         self.sock = sock
         self.attached = attached
         self.closed = False
-        self.handlers: list[tuple[object, object]] = []  # (event registry, callback)
+        self.handlers: list[tuple[Any, Any]] = []  # (gdb event registry, callback)
         self.saved_sections: str | None = None
         self.wlock = threading.Lock()
         self.writers: dict[str, object] = {}
@@ -457,24 +461,34 @@ class Agent:
     def op_ping(self) -> str:
         return "pong"
 
-    def target_is_remote(self) -> bool:
-        """True when the inferior runs through a remote target (gdbserver), so its
-        stdin/stdout don't go through gdb's inferior-tty (e.g. pwntools gdb.debug)."""
+    def remote_target(self) -> str | None:
+        """The gdbserver address (e.g. "localhost:1234") when the inferior runs through a
+        remote target, so its stdin/stdout don't go through gdb's inferior-tty (e.g.
+        pwntools gdb.debug); None for a local target."""
         try:
             conn = self.gdb.selected_inferior().connection
-            return conn is not None and conn.type in ("remote", "extended-remote")
+            if conn is not None and conn.type in ("remote", "extended-remote"):
+                return conn.details or conn.type
         except Exception:
-            debug("target_is_remote")
-            return False
+            debug("remote_target")
+        return None
+
+    def progspace_file(self) -> str | None:
+        prog = self.gdb.current_progspace()  # None when gdb has no program space yet
+        return prog.filename if prog is not None else None
+
+    def target_is_remote(self) -> bool:
+        return self.remote_target() is not None
 
     def op_info(self) -> dict:
         gdb = self.gdb
         info = {
             "gdb": gdb.VERSION,
             "pwndbg": None,
-            "file": gdb.current_progspace().filename,
+            "file": self.progspace_file(),
             "sections": list(SECTIONS),
             "remote": self.target_is_remote(),
+            "remote_addr": self.remote_target(),
         }
         if self.pwndbg is not None:
             info["pwndbg"] = getattr(self.pwndbg, "__version__", "loaded")
@@ -482,9 +496,10 @@ class Agent:
 
     def op_state(self) -> dict:
         gdb = self.gdb
-        st: dict = {"alive": False, "running": False, "pid": 0, "remote": self.target_is_remote()}
+        remote = self.remote_target()
+        st: dict = {"alive": False, "running": False, "pid": 0, "remote": remote is not None, "remote_addr": remote}
         try:
-            st["file"] = gdb.current_progspace().filename
+            st["file"] = self.progspace_file()
             inf = gdb.selected_inferior()
             st["pid"] = inf.pid
             thr = gdb.selected_thread()
@@ -509,6 +524,13 @@ class Agent:
                     except Exception:
                         debug("state: resolve pc symbol")
                         st["sym"] = st["func"]
+                    if self.pwndbg is not None:
+                        try:  # registers changed since the previous stop (pwndbg marks them with *)
+                            regs = self.pwndbg.aglib.regs
+                            st["changed_regs"] = [r.lower() for r in regs.changed]
+                            st["reg_names"] = sorted(r.lower() for r in regs.all)  # to find cells
+                        except Exception:
+                            debug("state: changed registers")
         except gdb.error:
             pass
         return st
