@@ -19,7 +19,7 @@ class Rpc:
         import queue
 
         self.sock = sock
-        self.inbox: "queue.Queue[dict]" = queue.Queue()
+        self.inbox: queue.Queue[dict] = queue.Queue()
         self.callbacks: dict[int, tuple] = {}
         self.next_id = 1
         self.lock = threading.Lock()

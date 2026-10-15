@@ -31,7 +31,7 @@ def test_eval_command_with_equals_is_skipped():
 
 
 def test_theme_is_case_insensitive_and_validated():
-    name = THEMES[0] if isinstance(THEMES, list) else next(iter(THEMES))
+    name = next(iter(THEMES))
     assert cli.parse_args([f"--theme={name.upper()}"]).theme == name
     assert cli.parse_args(["--theme", name.lower()]).theme == name
     with pytest.raises(SystemExit):

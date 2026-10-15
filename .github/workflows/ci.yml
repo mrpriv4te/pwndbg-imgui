@@ -7,6 +7,20 @@ on:
   pull_request:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # the package itself (imgui-bundle's type stubs for ui/panes.py), pytest for the tests
+      - run: pip install . ruff pyright pytest
+      - name: Ruff
+        run: ruff check .
+      - name: Pyright  # scope in pyproject.toml
+        run: pyright
+
   test:
     runs-on: ubuntu-latest
     strategy:
@@ -18,10 +32,8 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python }}
-      - run: pip install pytest pyflakes
-      - name: Lint
-        run: python -m pyflakes $(find src/pwndbg_imgui tools tests -name '*.py')
-      # the tested modules are stdlib-only: no imgui-bundle or display needed
+      # with the package installed, the GUI modules are imported too (no display needed)
+      - run: pip install . pytest
       - name: Unit tests
         run: python -m pytest -v
 
@@ -48,7 +60,7 @@ jobs:
   # commit list since the previous tag and the built wheel + sdist attached
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [test, package]
+    needs: [lint, test, package]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -46,3 +46,26 @@ pythonpath = ["src"]
 # the sdist only needs what builds and tests the package (not the example's libc or screenshots)
 [tool.hatch.build.targets.sdist]
 exclude = ["examples", "docs", ".github"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.ruff.lint]
+# pyflakes, pycodestyle errors/warnings, bugbear, pyupgrade, small clean-ups.
+# Not the pylint refactor rules: ImGui draw code is long by nature.
+select = ["E4", "E7", "E9", "F", "W", "B", "UP", "PIE", "C4"]
+
+# Type-checks everything but the files below. The App mixins (app, appearance, chrome,
+# panels, sections) share state through `self` in a way a checker can't follow; move code
+# out of them into standalone classes like ui/panes.py instead. views/widgets/native still
+# have Optional-narrowing errors to fix before they can come off this list.
+[tool.pyright]
+include = ["src/pwndbg_imgui", "tests"]
+exclude = [
+    "src/pwndbg_imgui/ui/app.py", "src/pwndbg_imgui/ui/appearance.py", "src/pwndbg_imgui/ui/chrome.py",
+    "src/pwndbg_imgui/ui/panels.py", "src/pwndbg_imgui/ui/sections.py",
+    "src/pwndbg_imgui/ui/views.py", "src/pwndbg_imgui/ui/widgets.py", "src/pwndbg_imgui/ui/native.py",
+    "**/__pycache__",
+]
+pythonVersion = "3.10"

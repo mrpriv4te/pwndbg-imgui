@@ -128,7 +128,7 @@ class ChromeMixin:
 
         if imgui.begin_menu("View"):
             imgui.separator_text("Context")
-            for name, sec in self.sections.items():
+            for sec in self.sections.values():
                 self._window_toggle(dp, sec["label"])
             imgui.separator_text("Tools")
             for label in self.tool_labels():
@@ -412,9 +412,9 @@ class ChromeMixin:
             if enabled:
                 items.append((f"{getattr(fa, 'ICON_FA_' + icon)}  {label}", shortcut, cb))
         for sec in self.sections.values():
-            items.append((f"Show  {sec['label']}", "window", lambda l=sec["label"]: self.focus_window(l)))
+            items.append((f"Show  {sec['label']}", "window", lambda lbl=sec["label"]: self.focus_window(lbl)))
         for label in self.tool_labels():
-            items.append((f"Show  {label}", "window", lambda l=label: self.focus_window(l)))
+            items.append((f"Show  {label}", "window", lambda lbl=label: self.focus_window(lbl)))
         for th in THEMES.values():
             items.append((f"{fa.ICON_FA_PALETTE}  Theme: {th.name}", "theme", lambda t=th: self.apply_theme(t)))
         for group, presets in TOOL_PRESETS:

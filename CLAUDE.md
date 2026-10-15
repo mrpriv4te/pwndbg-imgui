@@ -55,7 +55,8 @@ src/pwndbg_imgui/
   ui/
     app.py        App: state, gdb process, events, hello_imgui runner (core)
     chrome.py     menus, toolbar/title/status bar, palette, dialogs (mixin)
-    panels.py     tool windows: console, I/O, vmmap, breakpoints, config… (mixin)
+    panels.py     tool windows: console, I/O, commands, config, cyclic… (mixin)
+    panes.py      standalone pane classes: VmmapPane, BreakpointsPane (type-checked)
     sections.py   per-context-section behavior / gutters / menus (mixin)
     views.py      CmdView, DecompView, MemoryView
     widgets.py    TextView (the core text pane) + helpers
@@ -65,22 +66,29 @@ src/pwndbg_imgui/
 tools/guitest.py  GUI test driver (dev only, not shipped) + tools/smoke.steps
 ```
 `App` is composed of mixins: `class App(SectionsMixin, AppearanceMixin, PanelsMixin,
-ChromeMixin)`; `ui/app.py` holds the core methods, the others are the mixins.
+ChromeMixin)`; `ui/app.py` holds the core methods, the others are the mixins. The mixins
+share state through `self`, which no type checker can follow, so **new panes go in
+`ui/panes.py` as classes** (own UI state + `gui()`, data stays on `App`, created in
+`App.__init__`, listed in `tool_windows()`), and existing panels move there when touched.
 
 ## Dev workflow
 
 - Install for development: `pipx install -e .` (gives the `pwndbg-imgui` command).
-- Lint: `python -m pyflakes $(find src/pwndbg_imgui tools tests -name '*.py')` — keep it clean.
+- Lint: `ruff check .` (rules in `pyproject.toml`) and `pyright` (type checks; scope in
+  `pyproject.toml`: everything except the App mixins and views/widgets/native) — keep both
+  clean. Run pyright with imgui-bundle importable (e.g. the package installed in the venv).
 - Unit tests: `python -m pytest` (`tests/`, config in `pyproject.toml`). They cover the
-  stdlib-only modules (`term`, `payload`, `cli`, `settings`, agent helpers) and need no
-  imgui-bundle or display. `test_agent.py` enforces the agent's stdlib-only rule. Add a
-  test with any change to those modules; GUI behavior is checked with `tools/guitest.py`.
-- CI (`.github/workflows/ci.yml`): lint + pytest on Python 3.10–3.14, plus a packaging
-  job (`pip install .`, entry-point smoke checks). It doesn't run the GUI.
+  stdlib-only modules (`term`, `payload`, `cli`, `settings`, agent helpers) and the logic of
+  `ui/panes.py` (skipped without imgui-bundle); no display needed. `test_agent.py` enforces
+  the agent's stdlib-only rule. Add a test with any change to those modules; GUI behavior
+  is checked with `tools/guitest.py`.
+- CI (`.github/workflows/ci.yml`): a lint job (ruff + pyright), pytest on Python
+  3.10–3.14, a packaging job (`pip install .`, entry-point smoke checks), and a release job
+  on tags. It doesn't run the GUI.
 - Debugging: `--debug` / `PWNDBG_IMGUI_DEBUG=1` logs every swallowed exception (GUI and
   agent side) with a traceback to `~/.cache/pwndbg-imgui-debug.log` via `agent.debug()`.
   When adding an `except Exception` that hides an error, call `debug("<where>")` in it.
-- Not on PyPI: install from a clone or `pipx install git+https://github.com/mrpriv4te/pwndbg-imgui`. `.tmpl` isn't a module (ignore its `from pwn import *` warnings).
+- Not on PyPI: install from a clone or `pipx install git+https://github.com/mrpriv4te/pwndbg-imgui`.
 - Config lives in `~/.config/pwndbg-imgui/` (`settings.json`, `layout.ini`).
 - Versioning is **git tags via hatch-vcs** — never hardcode a version. `__version__`
   resolves from `importlib.metadata` / the generated `_version.py` (gitignored). Release =
@@ -131,7 +139,11 @@ Gotchas when testing:
   gdb's thread via `gdb.post_event`. Any new code that touches the gdb API must go through
   that path — never call gdb from the reader thread.
 - **New setting:** add the key to `Settings.DEFAULTS`; saved files are merged over the
-  defaults, so code can index `settings[key]` directly.
+  defaults, so code can index `settings[key]` directly. Access it as `settings[key]` each
+  time rather than keeping a reference. `App.persist()` writes settings every 60 s and on
+  exit; `Settings.save()` three-way merges with the file (what this window changed wins,
+  the rest keeps another window's saves; histories append). An append-only list belongs
+  in `Settings.HISTORY_LIMITS`.
 - **New context section:** add it to `SECTIONS` in `agent.py` (routed via `contextoutput`)
   and to `catalog.SECTION_META` (label, icon, follow mode, default visibility, dock space).
 

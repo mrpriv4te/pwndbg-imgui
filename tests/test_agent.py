@@ -16,10 +16,10 @@ def test_agent_imports_only_the_standard_library():
     for node in ast.walk(ast.parse(AGENT_SRC)):
         if isinstance(node, ast.Import):
             names = [a.name for a in node.names]
-        elif isinstance(node, ast.ImportFrom) and node.level == 0:
+        elif isinstance(node, ast.ImportFrom):
+            assert node.level == 0 and node.module, "relative import in agent.py"
             names = [node.module]
         else:
-            assert not (isinstance(node, ast.ImportFrom) and node.level), "relative import in agent.py"
             continue
         for name in names:
             assert name.split(".")[0] in allowed, f"agent.py imports {name!r}"

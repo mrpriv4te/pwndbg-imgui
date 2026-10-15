@@ -149,8 +149,8 @@ class Term:
             if m and m.start() < len(data):
                 self.pending = data[m.start():]
                 data = data[: m.start()]
+            saved = self.flags
             if style_flags:
-                saved = self.flags
                 self.flags |= style_flags
                 self._restyle()
             pos = 0
