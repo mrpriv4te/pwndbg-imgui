@@ -7,7 +7,8 @@ work on the code without re-deriving it.
 
 `pwndbg-imgui`: a dockable Dear ImGui GUI front-end for **pwndbg**, Ghidra/IDA style.
 A thin GUI that drives the user's existing **gdb + pwndbg** — it does not bundle pwndbg.
-Linux, x86-64, Python ≥ 3.10. Installed with pipx. Single dependency: `imgui-bundle`.
+Linux, x86-64, Python ≥ 3.11 (imgui-bundle has no 3.10 wheels); the agent
+runs in gdb's own Python and must stay 3.10-compatible. Installed with pipx. Single dependency: `imgui-bundle`.
 
 ## Architecture (the important part)
 
@@ -83,7 +84,8 @@ share state through `self`, which no type checker can follow, so **new panes go 
   the agent's stdlib-only rule. Add a test with any change to those modules; GUI behavior
   is checked with `tools/guitest.py`.
 - CI (`.github/workflows/ci.yml`): a lint job (ruff + pyright), pytest on Python
-  3.10–3.14, a packaging job (`pip install .`, entry-point smoke checks), and a release job
+  3.11–3.14, a stdlib-only test run on 3.10 (the agent runs in gdb's Python, which can
+  be 3.10), a packaging job (`pip install .`, entry-point smoke checks), and a release job
   on tags. It doesn't run the GUI.
 - Debugging: `--debug` / `PWNDBG_IMGUI_DEBUG=1` logs every swallowed exception (GUI and
   agent side) with a traceback to `~/.cache/pwndbg-imgui-debug.log` via `agent.debug()`.

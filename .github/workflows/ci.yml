@@ -26,7 +26,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python: ["3.11", "3.12", "3.13", "3.14"]
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-python@v7
@@ -35,6 +35,19 @@ jobs:
       # with the package installed, the GUI modules are imported too (no display needed)
       - run: pip install . pytest
       - name: Unit tests
+        run: python -m pytest -v
+
+  # gdb's embedded Python can be 3.10 (e.g. Ubuntu 22.04), and the agent runs there: keep
+  # the stdlib-only modules 3.10-compatible (imgui-bundle has no 3.10 wheels: GUI tests skip)
+  agent-py310:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.10"
+      - run: pip install pytest
+      - name: Unit tests (stdlib-only modules)
         run: python -m pytest -v
 
   package:
@@ -60,7 +73,7 @@ jobs:
   # commit list since the previous tag and the built wheel + sdist attached
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [lint, test, package]
+    needs: [lint, test, agent-py310, package]
     runs-on: ubuntu-latest
     permissions:
       contents: write

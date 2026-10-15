@@ -9,7 +9,7 @@ description = "A dockable Dear ImGui front-end for pwndbg"
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
-requires-python = ">=3.10"
+requires-python = ">=3.11"  # imgui-bundle ships no Python 3.10 wheels
 authors = [{ name = "mrpriv4te" }]
 dependencies = ["imgui-bundle>=1.92"]
 keywords = ["pwndbg", "gdb", "debugger", "imgui", "reverse-engineering", "exploitation"]
@@ -49,7 +49,7 @@ exclude = ["examples", "docs", ".github"]
 
 [tool.ruff]
 line-length = 120
-target-version = "py310"
+target-version = "py311"
 
 [tool.ruff.lint]
 # pyflakes, pycodestyle errors/warnings, bugbear, pyupgrade, small clean-ups.
@@ -68,4 +68,4 @@ exclude = [
     "src/pwndbg_imgui/ui/views.py", "src/pwndbg_imgui/ui/widgets.py", "src/pwndbg_imgui/ui/native.py",
     "**/__pycache__",
 ]
-pythonVersion = "3.10"
+pythonVersion = "3.11"
