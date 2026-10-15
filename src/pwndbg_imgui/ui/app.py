@@ -46,6 +46,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.theme = THEMES.get(st["theme"], THEMES["Pwn Night"])
         self.ui_size = float(st["ui_size"])
         self.code_size = float(st["code_size"])
+        self._slider_edit: dict[str, float] = {}  # deferred-commit scratch (UI-size slider)
         self.char_w = 8.0
         self.line_h = 18.0
         self.mono = None
@@ -166,6 +167,23 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
     def io_is_external(self) -> bool:
         """The program's I/O does not flow through our PTY (remote/gdbserver target)."""
         return bool(self.state.get("remote") or self.info.get("remote"))
+
+    def ui_size_slider(self, label: str) -> None:
+        """A UI-size slider that only applies on release.
+
+        Changing the UI font live would resize the slider itself under the
+        cursor and make the whole UI shake while dragging, so we preview the
+        handle with a scratch value and commit to self.ui_size on release.
+        """
+        pending = self._slider_edit.get(label)
+        shown = pending if pending is not None else self.ui_size
+        changed, v = imgui.slider_float(label, shown, 10.0, 26.0, "%.0f")
+        if changed:
+            self._slider_edit[label] = round(v)
+        if imgui.is_item_deactivated_after_edit():
+            self.ui_size = self._slider_edit.pop(label, self.ui_size)
+        elif pending is not None and not imgui.is_item_active():
+            self._slider_edit.pop(label, None)  # released without a committed edit
 
     def toast(self, text: str, kind: str = "info", ttl: float = 3.5, actions: list | None = None,
               key: str | None = None) -> None:

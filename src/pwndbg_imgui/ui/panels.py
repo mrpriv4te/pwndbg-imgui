@@ -664,9 +664,7 @@ class PanelsMixin:
                     self.toast("Font change applies on next start", "info")
             imgui.end_combo()
         imgui.set_next_item_width(imgui.get_font_size() * 14)
-        changed, v = imgui.slider_float("UI size", self.ui_size, 10.0, 26.0, "%.0f")
-        if changed:
-            self.ui_size = round(v)
+        self.ui_size_slider("UI size")
         imgui.set_next_item_width(imgui.get_font_size() * 14)
         changed, v = imgui.slider_float("Code size  (Ctrl+wheel)", self.code_size, 8.0, 32.0, "%.0f")
         if changed:
