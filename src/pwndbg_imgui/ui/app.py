@@ -130,7 +130,6 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.io_history_pos = -1
         self.io_view_mode = "terminal"
         # misc tool state
-        self.goto_input = ""
         self.watch_input = ""
         self.cmd_filter = ""
         self.cmd_selected = None

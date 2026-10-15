@@ -77,8 +77,7 @@ class ChromeMixin:
             if pressed(K.p):
                 self.palette_open = True
             elif pressed(K.g):
-                self.focus_window(f"{fa.ICON_FA_MEMORY} Memory")
-                self.memory.focus_input = True
+                self.palette_open = True
             elif pressed(K.equal) or pressed(K.keypad_add):
                 self.set_code_size(self.code_size + 1)
             elif pressed(K.minus) or pressed(K.keypad_subtract):
@@ -323,23 +322,18 @@ class ChromeMixin:
         imgui.set_item_tooltip("Next context (history)")
         imgui.pop_style_color()
         vsep()
-        imgui.set_next_item_width(imgui.get_font_size() * 16)
-        entered, self.goto_input = imgui.input_text_with_hint(
-            "##goto", f"{fa.ICON_FA_CROSSHAIRS} go to address / symbol…", self.goto_input,
-            imgui.InputTextFlags_.enter_returns_true,
-        )
-        if entered and self.goto_input.strip():
-            if imgui.get_io().key_ctrl:
-                self.open_cmd_view(f"nearpc {self.goto_input.strip()} 40")
-            else:
-                self.memory.expr = self.goto_input.strip()
-                self.memory.goto_expr(self.memory.expr)
-                self.focus_window(f"{fa.ICON_FA_MEMORY} Memory")
-        imgui.set_item_tooltip("Enter: open in Memory · Ctrl+Enter: disassemble")
-        imgui.same_line()
-        if imgui.button(f"{fa.ICON_FA_WAND_MAGIC_SPARKLES}##pal"):
+        # one search box for everything: it opens the palette (addresses, symbols, commands…)
+        th = self.theme
+        imgui.push_style_color(imgui.Col_.button, imgui.get_style_color_vec4(imgui.Col_.frame_bg))
+        imgui.push_style_color(imgui.Col_.button_hovered, imgui.get_style_color_vec4(imgui.Col_.frame_bg_hovered))
+        imgui.push_style_color(imgui.Col_.text, v4(th.dim))
+        imgui.push_style_var(imgui.StyleVar_.button_text_align, ImVec2(0.0, 0.5))
+        if imgui.button(f"{fa.ICON_FA_MAGNIFYING_GLASS}  Go to / search…##goto", ImVec2(imgui.get_font_size() * 16, 0)):
             self.palette_open = True
-        imgui.set_item_tooltip("Command palette  [Ctrl+P]")
+        imgui.pop_style_var()
+        imgui.pop_style_color(3)
+        imgui.set_item_tooltip("Address, symbol or expression to open in Memory / disassemble,\n"
+                               "or a command, window, theme…  [Ctrl+P / Ctrl+G]")
         # state badge, right aligned
         text, color = self.state_text()
         pad = 12.0
@@ -426,6 +420,28 @@ class ChromeMixin:
                           lambda c=c: self._palette_command(c)))
         return items
 
+    def goto_items(self, query: str) -> tuple[list, list]:
+        """Palette entries acting on the typed text itself: (go-to entries, run entry).
+        Go-to entries come first when the text looks like an address, a symbol or an
+        expression (a single token), after the other matches otherwise."""
+        q = query.strip()
+        if not q:
+            return [], []
+        run = [(f"{fa.ICON_FA_TERMINAL}  Run in gdb:  {q}", "console", lambda: self.send_console(q))]
+        if len(q.split()) > 1 and not any(c in q for c in "$+-*/()[]&") and "0x" not in q:
+            return [], run  # several plain words: a command, not a location
+        goto = [
+            (f"{fa.ICON_FA_MEMORY}  Memory at  {q}", "go to", lambda: self.goto_memory(q)),
+            (f"{fa.ICON_FA_CODE}  Disassemble at  {q}", "go to", lambda: self.open_cmd_view(f"nearpc {q} 40")),
+            (f"{fa.ICON_FA_LAYER_GROUP}  Telescope  {q}", "go to", lambda: self.open_cmd_view(f"telescope {q} 32")),
+        ]
+        return goto, run
+
+    def goto_memory(self, expr: str) -> None:
+        self.memory.expr = expr
+        self.memory.goto_expr(expr)
+        self.focus_window(f"{fa.ICON_FA_MEMORY} Memory")
+
     def _palette_command(self, c) -> None:
         if imgui.get_io().key_shift:
             self.open_cmd_view(c["name"])
@@ -452,18 +468,25 @@ class ChromeMixin:
             self._palette_focus = False
         imgui.set_next_item_width(-1)
         changed, self.palette_query = imgui.input_text_with_hint(
-            "##palq", "Type a command, window, theme or pwndbg command…  (Shift+Enter: open as view)", self.palette_query)
+            "##palq", "Address, symbol, expression, command, window, theme…  (Shift+Enter: open as view)",
+            self.palette_query)
         if changed:
             self.palette_sel = 0
         q = self.palette_query.lower().split()
         scored = []
         for label, hint, cb in self.palette_items():
             low = label.lower()
-            if all(t in low for t in q):
+            if all(t in low or t in hint.lower() for t in q):  # the group counts: "heap bins"
                 score = sum(low.find(t) for t in q) + len(low) * 0.01
                 scored.append((score, label, hint, cb))
         scored.sort(key=lambda s: s[0])
-        scored = scored[:14]
+        goto, run_line = self.goto_items(self.palette_query)
+        extra_goto = [(0, *g) for g in goto]
+        if len(q) == 1:  # a single token: most likely an address, symbol or expression
+            scored = extra_goto + scored[:11]
+        else:
+            scored = scored[:11] + extra_goto
+        scored += [(0, *r) for r in run_line]
         K = imgui.Key
         if imgui.is_key_pressed(K.down_arrow):
             self.palette_sel = min(self.palette_sel + 1, len(scored) - 1)
@@ -509,7 +532,7 @@ class ChromeMixin:
                 ("F5", "Continue (Run when not started)"), ("Ctrl+F5", "Run / restart"), ("Shift+F5", "Kill"),
                 ("F6", "Pause (interrupt)"), ("F7 / F8", "Step into / over (instruction)"),
                 ("Shift+F7 / Shift+F8", "Step / next (source line)"), ("Ctrl+F7", "Step out (finish)"),
-                ("Ctrl+P", "Command palette"), ("Ctrl+G", "Go to address (Memory)"), ("Ctrl+`", "Focus console"),
+                ("Ctrl+P / Ctrl+G", "Go to (address, symbol, expression) / command palette"), ("Ctrl+`", "Focus console"),
                 ("Ctrl+= / Ctrl+- / Ctrl+0", "Zoom code font"), ("Ctrl+wheel", "Zoom code font"),
                 ("Ctrl+F / F3", "Find in a text pane"), ("Ctrl+C / Ctrl+A", "Copy / select all in a text pane"),
                 ("Ctrl+click address", "Open address in Memory"), ("Right-click", "Context actions everywhere"),

@@ -173,7 +173,9 @@ pwndbg-imgui --exploit > e.py     # or to another file
   (remembered across runs), **live command views** refreshed on every stop (`heap`, `bins`,
   `vis_heap_chunks`, `got`, `telescope`…), a **cyclic pattern tool** (generate, send, find an
   offset from `$pc`/`$sp`).
-- **🪄 Comfort** — command palette (<kbd>Ctrl</kbd>+<kbd>P</kbd>), toolbar
+- **🪄 Comfort** — one search box / command palette (<kbd>Ctrl</kbd>+<kbd>P</kbd>): type an
+  address, symbol or expression to open it in Memory, disassemble or telescope it, or find any
+  command, view, window or theme; toolbar
   (Run/Start/Continue/Pause/Step…), status bar (pid, arch, checksec, legend), notifications
   (breakpoint, signal, exit).
 - **🎨 Appearance** — 13 themes (dark and light, contrast auto-corrected), a themed title bar
@@ -187,7 +189,7 @@ pwndbg-imgui --exploit > e.py     # or to another file
 | Key | Action | | Key | Action |
 |---|---|---|---|---|
 | <kbd>F5</kbd> | Continue / Run | | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Palette |
-| <kbd>F6</kbd> | Pause | | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to address |
+| <kbd>F6</kbd> | Pause | | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to (same palette) |
 | <kbd>F7</kbd> / <kbd>F8</kbd> | Step / Next (instruction) | | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Find |
 | <kbd>⇧</kbd>+<kbd>F7</kbd> / <kbd>F8</kbd> | Step / Next (source) | | <kbd>Ctrl</kbd>+wheel | Zoom code |
 | <kbd>Ctrl</kbd>+<kbd>F7</kbd> | Finish | | <kbd>⇧</kbd>+<kbd>F5</kbd> | Kill |
@@ -252,11 +254,13 @@ src/pwndbg_imgui/
 ├── settings.py       persistent settings
 ├── fonts.py          font discovery (fontconfig)
 ├── payload.py        cyclic, payload expressions, hexdump
+├── registers.py      register cells in the regs pane
 ├── templates/        exploit.py template (--exploit)
 └── ui/
     ├── app.py        state, gdb process, events, hello_imgui runner
     ├── chrome.py     menus, toolbar/title/status bar, palette, dialogs
-    ├── panels.py     tool windows (console, I/O, vmmap, breakpoints…)
+    ├── panels.py     tool windows (console, I/O, commands, config…)
+    ├── panes.py      standalone panes (vmmap, breakpoints)
     ├── sections.py   per-context-section behavior
     ├── views.py      memory, decompiler and command views
     ├── widgets.py    TextView and helpers

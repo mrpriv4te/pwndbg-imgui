@@ -52,6 +52,7 @@ src/pwndbg_imgui/
   settings.py   ~/.config/pwndbg-imgui/settings.json
   fonts.py      fontconfig discovery + glyph fallbacks
   payload.py    cyclic / payload expressions / hexdump
+  registers.py  register_cells(): find each register in a regs-pane line (compact columns)
   templates/exploit.tmpl   template emitted by `--exploit`
   ui/
     app.py        App: state, gdb process, events, hello_imgui runner (core)
