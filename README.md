@@ -162,9 +162,9 @@ a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
 
 ## 🖼️ Gallery
 
-| Memory view | Command palette |
+| Memory view and the Heap's `vis-heap-chunks` tab | One search box: go to, run, find |
 |:---:|:---:|
-| ![Memory](docs/screenshots/memory.png) | ![Palette](docs/screenshots/palette.png) |
+| ![Memory and heap](docs/screenshots/memory.png) | ![Search and palette](docs/screenshots/palette.png) |
 
 ---
 
