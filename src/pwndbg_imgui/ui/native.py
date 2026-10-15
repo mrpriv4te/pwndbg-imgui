@@ -40,7 +40,8 @@ class NativeWindow:
             fn.argtypes = args
             fn.restype = res
         self.lib = lib
-        self.win = ctypes.c_void_p(hello_imgui.get_glfw_window_address())
+        # present at runtime, missing from imgui-bundle's type stubs
+        self.win = ctypes.c_void_p(hello_imgui.get_glfw_window_address())  # pyright: ignore[reportAttributeAccessIssue]
         if not self.win.value:
             raise OSError("no GLFW window")
         self.can_move = True

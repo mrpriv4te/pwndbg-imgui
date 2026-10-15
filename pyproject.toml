@@ -56,16 +56,15 @@ target-version = "py311"
 # Not the pylint refactor rules: ImGui draw code is long by nature.
 select = ["E4", "E7", "E9", "F", "W", "B", "UP", "PIE", "C4"]
 
-# Type-checks everything but the files below. The App mixins (app, appearance, chrome,
-# panels, sections) share state through `self` in a way a checker can't follow; move code
-# out of them into standalone classes like ui/panes.py instead. views/widgets/native still
-# have Optional-narrowing errors to fix before they can come off this list.
+# Type-checks everything but the App mixins (app, appearance, chrome, panels, sections):
+# they share state through `self` in a way a checker can't follow. Move code out of them
+# into standalone classes like ui/panes.py instead of widening this list.
 [tool.pyright]
 include = ["src/pwndbg_imgui", "tests"]
 exclude = [
     "src/pwndbg_imgui/ui/app.py", "src/pwndbg_imgui/ui/appearance.py", "src/pwndbg_imgui/ui/chrome.py",
     "src/pwndbg_imgui/ui/panels.py", "src/pwndbg_imgui/ui/sections.py",
-    "src/pwndbg_imgui/ui/views.py", "src/pwndbg_imgui/ui/widgets.py", "src/pwndbg_imgui/ui/native.py",
     "**/__pycache__",
 ]
 pythonVersion = "3.11"
+reportMissingModuleSource = false  # imgui-bundle's compiled modules ship stubs only

@@ -355,11 +355,19 @@ class MemoryView:
         cur = self.byte_at(addr)
         return cur is not None and cur != pd[off]
 
+    def read_bytes(self, addr: int, size: int) -> bytes | None:
+        """`size` loaded bytes at `addr`, or None if any of them is unknown / unreadable."""
+        out = bytearray()
+        for i in range(size):
+            b = self.byte_at(addr + i)
+            if b is None:
+                return None
+            out.append(b)
+        return bytes(out)
+
     def read_int(self, addr: int, size: int):
-        bs = [self.byte_at(addr + i) for i in range(size)]
-        if any(b is None for b in bs):
-            return None
-        return int.from_bytes(bytes(bs), "little")
+        bs = self.read_bytes(addr, size)
+        return None if bs is None else int.from_bytes(bs, "little")
 
     def write_byte(self, addr: int, value: int) -> None:
         if self.data_base is not None:
@@ -553,25 +561,29 @@ class MemoryView:
             self._keys(io)
         imgui.pop_font()
         if imgui.begin_popup("##memctx"):
-            a = self.sel
-            imgui.text_colored(v4(th.accent), f"{a:#x}")
-            q = self.read_int(a & ~7 if self.mode == "qwords" else a, 8)
-            if q is not None and app.page_for(q) and imgui.menu_item_simple(f"Follow pointer {q:#x}"):
-                self.goto(q)
-            imgui.push_id("addr")
-            app.address_menu_items(a)
-            imgui.pop_id()
-            imgui.separator()
-            row = a & ~(self.bpr - 1)
-            row_bytes = [self.byte_at(row + i) for i in range(self.bpr)]
-            if imgui.menu_item_simple("Copy row as hex") and None not in row_bytes:
-                imgui.set_clipboard_text(bytes(row_bytes).hex())
-            if imgui.menu_item_simple("Copy row as Python bytes") and None not in row_bytes:
-                imgui.set_clipboard_text(repr(bytes(row_bytes)))
+            if self.sel is not None:  # set by the right-click that opened it
+                self._context_menu(app, th, self.sel)
             imgui.end_popup()
         imgui.push_font(app.mono, app.code_size)
 
+    def _context_menu(self, app, th, a: int) -> None:
+        imgui.text_colored(v4(th.accent), f"{a:#x}")
+        q = self.read_int(a & ~7 if self.mode == "qwords" else a, 8)
+        if q is not None and app.page_for(q) and imgui.menu_item_simple(f"Follow pointer {q:#x}"):
+            self.goto(q)
+        imgui.push_id("addr")
+        app.address_menu_items(a)
+        imgui.pop_id()
+        imgui.separator()
+        row_bytes = self.read_bytes(a & ~(self.bpr - 1), self.bpr)
+        if imgui.menu_item_simple("Copy row as hex") and row_bytes is not None:
+            imgui.set_clipboard_text(row_bytes.hex())
+        if imgui.menu_item_simple("Copy row as Python bytes") and row_bytes is not None:
+            imgui.set_clipboard_text(repr(row_bytes))
+
     def _keys(self, io) -> None:
+        if self.sel is None or self.base is None:
+            return
         step = 8 if self.mode == "qwords" else 1
         moves = {
             imgui.Key.left_arrow: -step, imgui.Key.right_arrow: step,

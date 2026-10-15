@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
 
 from imgui_bundle import ImVec2, ImVec4, imgui
 from imgui_bundle import icons_fontawesome_6 as fa
@@ -65,8 +66,9 @@ class TextView:
     """Scrollable, selectable, searchable view over a Term, with clickable
     addresses, breakpoint gutter and context menu."""
 
-    def __init__(self, app, term: Term, vid: str, follow: str = "top", gutter=None, gutter_click=None,
-                 menu=None, on_dblclick=None, empty_hint: str = "") -> None:
+    def __init__(self, app, term: Term, vid: str, follow: str = "top", gutter: Callable | None = None,
+                 gutter_click: Callable | None = None, menu: Callable | None = None,
+                 on_dblclick: Callable | None = None, empty_hint: str | Callable[[], str] = "") -> None:
         self.app = app
         self.term = term
         self.vid = vid
@@ -98,7 +100,8 @@ class TextView:
         self.keep_scroll_once = False
         self.lockable = False  # show a lock toggle that freezes the scroll position
         self.locked = False
-        self.row_tint = None  # optional (line text) -> [(col0, col1 or None = row end, ImU32)] to tint
+        # optional (line text) -> [(col0, col1 or None = row end, ImU32)]: spans to tint
+        self.row_tint: Callable[[str], list[tuple[int, int | None, int]] | None] | None = None
 
     # -- selection helpers ----------------------------------------------
     def selection(self):
@@ -423,7 +426,7 @@ class TextView:
                 return li, max(0, min(int(c), len(lines[li].chars)))
 
             if hovered and imgui.is_mouse_clicked(0):
-                if in_gutter and self.gutter_click is not None and 0 <= m_line < n:
+                if in_gutter and self.gutter and self.gutter_click and 0 <= m_line < n:
                     if self.gutter(m_line, lines[m_line].text) is not None:
                         self.gutter_click(m_line, lines[m_line].text)
                 elif io.key_ctrl and hover_tok is not None:

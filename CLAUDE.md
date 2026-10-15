@@ -77,7 +77,7 @@ share state through `self`, which no type checker can follow, so **new panes go 
 
 - Install for development: `pipx install -e .` (gives the `pwndbg-imgui` command).
 - Lint: `ruff check .` (rules in `pyproject.toml`) and `pyright` (type checks; scope in
-  `pyproject.toml`: everything except the App mixins and views/widgets/native) — keep both
+  `pyproject.toml`: everything except the five App mixins) — keep both
   clean. Run pyright with imgui-bundle importable (e.g. the package installed in the venv).
 - Unit tests: `python -m pytest` (`tests/`, config in `pyproject.toml`). They cover the
   stdlib-only modules (`term`, `payload`, `cli`, `settings`, agent helpers) and the logic of
