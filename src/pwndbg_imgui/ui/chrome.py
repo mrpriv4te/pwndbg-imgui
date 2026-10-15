@@ -385,6 +385,12 @@ class ChromeMixin:
         sep = 2.0
         pos, size = imgui.get_window_pos(), imgui.get_window_size()
         imgui.get_window_draw_list().add_rect_filled(pos, ImVec2(pos.x + size.x, pos.y + sep), u32(th.bg))
+        # the bar's window stops a pixel short of the viewport's bottom: paint that strip in the
+        # bar's color (behind every window), or the app background shows as a thin dark line
+        vp = imgui.get_window_viewport()
+        imgui.get_background_draw_list(vp).add_rect_filled(
+            ImVec2(pos.x, pos.y + size.y - 1), ImVec2(pos.x + size.x, vp.pos.y + vp.size.y),
+            imgui.get_color_u32(imgui.Col_.window_bg))
         bar_h = size.y
 
         def center(text_h: float) -> None:  # every item on the bar's vertical middle

@@ -99,9 +99,12 @@ class TableCard:
             if need < room:
                 height = need
         imgui.push_style_var(imgui.StyleVar_.child_rounding, self.RADIUS)
-        imgui.push_style_var(imgui.StyleVar_.window_padding, ImVec2(0, 0))
+        # 1 px inset: the outline (drawn on the card's edge) then sits outside the table, so it
+        # doesn't eat into the scrollbars (same gap on both sides of the grab)
+        imgui.push_style_var(imgui.StyleVar_.window_padding, ImVec2(1, 1))
         imgui.push_style_color(imgui.Col_.child_bg, v4(mix(th.panel, th.fg, 0.05)))
-        imgui.begin_child(f"{self.id}_card", ImVec2(0, height), imgui.ChildFlags_.none,
+        imgui.begin_child(f"{self.id}_card", ImVec2(0, height + 2 if height else 0),
+                          imgui.ChildFlags_.always_use_window_padding,
                           imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse)
         imgui.pop_style_color()
         imgui.pop_style_var(2)
