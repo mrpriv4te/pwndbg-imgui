@@ -90,12 +90,22 @@ class TableCard:
         th = app.theme
         style = imgui.get_style()
         self.bg_now = th.panel if self.bg is None else (self.bg() if callable(self.bg) else self.bg)
-        room = imgui.get_content_region_avail().y if max_height is None else max_height
+        avail = imgui.get_content_region_avail()
+        # the tables' scrollbars: a gap between the rows and the grab (the track is transparent)
+        # through more padding, and a bar wider by as much so the grab is as wide as elsewhere
+        # (read the style before pushing anything: scrollbar_padding changes with the push)
+        gap, pad = 3.0, style.scrollbar_padding
+        bar = style.scrollbar_size + 2 * (gap - pad)
+        visible_w = avail.x - 2  # inside the card's 1 px inset
+        inner_w = self._inner_width(visible_w)
+        room = avail.y if max_height is None else max_height
         height = 0.0 if max_height is None else max_height
         if rows is not None:  # fit the rows when they fit, else fill and scroll
             line = imgui.get_frame_height() if self.framed else imgui.get_text_line_height()
             header_h = imgui.get_text_line_height() + 2 * style.cell_padding.y
             need = header_h + rows * (line + 2 * style.cell_padding.y) + 2
+            if inner_w > visible_w:
+                need += bar  # the horizontal scrollbar takes that height under the rows
             if need < room:
                 height = need
         imgui.push_style_var(imgui.StyleVar_.child_rounding, self.RADIUS)
@@ -111,13 +121,9 @@ class TableCard:
         pos, size = imgui.get_window_pos(), imgui.get_window_size()
         self.rect = (pos, ImVec2(pos.x + size.x, pos.y + size.y))
         self.dl = imgui.get_window_draw_list()
-        # a gap between the rows and the scrollbar's grab (the track itself is transparent):
-        # more padding, and a wider bar by as much, so the grab is as wide as everywhere else
-        # (read the style before pushing: scrollbar_padding changes with the first push)
-        gap, size, pad = 3.0, style.scrollbar_size, style.scrollbar_padding
         imgui.push_style_var(imgui.StyleVar_.scrollbar_padding, gap)
-        imgui.push_style_var(imgui.StyleVar_.scrollbar_size, size + 2 * (gap - pad))
-        self.began = imgui.begin_table(self.id, len(self.columns), self.flags, ImVec2(0, 0), self._inner_width())
+        imgui.push_style_var(imgui.StyleVar_.scrollbar_size, bar)
+        self.began = imgui.begin_table(self.id, len(self.columns), self.flags, ImVec2(0, 0), inner_w)
         imgui.pop_style_var(2)
         if not self.began:
             return False
@@ -130,7 +136,7 @@ class TableCard:
         self.row_tops = []
         return True
 
-    def _inner_width(self) -> float:
+    def _inner_width(self, visible: float) -> float:
         """With horizontal scrolling, a stretch column only fills the visible width and its
         long text gets clipped: make the table as wide as the widest texts recorded last
         frame (or the card, if wider), so it scrolls instead and the last column still fills."""
@@ -145,7 +151,7 @@ class TableCard:
                 continue
             texts = [name] + [r[i] for r in rows if i < len(r)]
             total += max(imgui.calc_text_size(t).x for t in texts) + pad
-        return max(imgui.get_content_region_avail().x, total)
+        return max(visible, total)
 
     def cell(self, text: str) -> None:
         """Record the current cell's text (call once per cell, in order)."""
