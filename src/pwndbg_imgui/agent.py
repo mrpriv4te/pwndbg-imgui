@@ -39,6 +39,10 @@ def debug_log_path() -> str:
     return os.path.join(cache, f"{APP_NAME}-debug.log")
 
 
+def debug_enabled() -> bool:
+    return bool(os.environ.get(ENV_DEBUG))
+
+
 def debug(where: str) -> None:
     """Log the exception being handled, with $PWNDBG_IMGUI_DEBUG set (`--debug`).
 

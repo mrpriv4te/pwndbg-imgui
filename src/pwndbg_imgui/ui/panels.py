@@ -7,6 +7,7 @@ import re
 
 from imgui_bundle import ImVec2, hello_imgui, imgui
 from imgui_bundle import icons_fontawesome_6 as fa
+from ..agent import debug, debug_enabled
 from ..payload import cyclic, cyclic_find, eval_payload, hexdump_ansi, parse_bytes_input
 from ..term import ECHO, strip_ansi
 from ..theme import THEMES
@@ -98,6 +99,9 @@ class PanelsMixin:
         imgui.push_font(self.mono, self.code_size)
         entered, self.console_input = imgui.input_text_with_hint("##console_in", hint, self.console_input, flags, self._console_cb)
         imgui.pop_font()
+        if (not entered and self.console_input.strip() and debug_enabled()
+                and (imgui.is_key_pressed(imgui.Key.enter, False) or imgui.is_key_pressed(imgui.Key.keypad_enter, False))):
+            debug(f"console: Enter pressed but the command was not submitted ({self._focus_report()})")
         if imgui.is_item_active():
             io = imgui.get_io()
             if io.key_ctrl and imgui.is_key_pressed(imgui.Key.c, False) and running:
@@ -110,6 +114,8 @@ class PanelsMixin:
             self.completions = []
         if entered:
             cmd = self.console_input
+            debug(f"console: submit {cmd!r} (attached={self.attached} running={running} "
+                  f"gdb_idle={self.gdb_idle} connected={self.connected()})")
             if cmd.strip() and (not self.history or self.history[-1] != cmd):
                 self.history.append(cmd)
             self.history_pos = -1
@@ -122,6 +128,21 @@ class PanelsMixin:
             self.console_input = ""
             self.console_view.at_bottom = True
             imgui.set_keyboard_focus_here(-1)
+
+    def _focus_report(self) -> str:
+        """Who has the keyboard right now, for --debug logs of input problems."""
+        io = imgui.get_io()
+        try:
+            ctx = imgui.get_current_context()
+            focused = ctx.nav_window.name if ctx.nav_window else None
+            active = ctx.active_id_window.name if ctx.active_id_window else None
+            active_id = ctx.active_id
+        except Exception:
+            focused = active = active_id = "?"
+        return (f"focused window={focused!r}, active item={active_id} in {active!r}, "
+                f"input active={imgui.is_item_active()}, want_text_input={io.want_text_input}, "
+                f"ctrl={io.key_ctrl} alt={io.key_alt} shift={io.key_shift} super={io.key_super}, "
+                f"app focus lost={io.app_focus_lost}")
 
     def _console_cb(self, data) -> int:
         F = imgui.InputTextFlags_

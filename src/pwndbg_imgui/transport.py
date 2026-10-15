@@ -10,6 +10,7 @@ import threading
 import time
 
 from . import APP_NAME
+from .agent import debug
 from .term import Term
 import socket
 
@@ -120,6 +121,7 @@ class Pty:
                 time.sleep(0.01)
                 continue
             except OSError:
+                debug(f"pty write failed, {len(data)} bytes dropped")
                 return
             data = data[n:]
 
