@@ -461,6 +461,7 @@ class MemoryView:
     def _grid(self, app, th) -> None:
         cw = app.char_w
         lh = app.line_h
+        dy = app.text_dy  # center the glyphs in their row (see AppearanceMixin.measure)
         pos = imgui.get_cursor_screen_pos()
         win_h = imgui.get_content_region_avail().y
         rows = max(1, int(win_h // lh))
@@ -498,7 +499,7 @@ class MemoryView:
             y = pos.y + r * lh
             page = app.page_for(addr)
             acol = u32(th.kind_color(page[5])) if page else dim
-            dl.add_text(ImVec2(pos.x, y), acol, f"{addr:0{digits}x}")
+            dl.add_text(ImVec2(pos.x, y + dy), acol, f"{addr:0{digits}x}")
             if self.mode == "bytes":
                 for i in range(bpr):
                     a = addr + i
@@ -509,14 +510,14 @@ class MemoryView:
                     elif self.changed(a):
                         dl.add_rect_filled(ImVec2(x - 2, y), ImVec2(x + 2 * cw + 2, y + lh), u32(th.red, 0.28), 3)
                     if b is None:
-                        dl.add_text(ImVec2(x, y), dim, "??")
+                        dl.add_text(ImVec2(x, y + dy), dim, "??")
                     else:
                         if a == self.sel and self.nibble is not None:
                             txt = f"{self.nibble:x}_"
                         else:
                             txt = f"{b:02x}"
                         c = dim if b == 0 else (fg if 0x20 <= b < 0x7F else (u32(th.yellow) if b == 0xFF else u32(th.cyan)))
-                        dl.add_text(ImVec2(x, y), c, txt)
+                        dl.add_text(ImVec2(x, y + dy), c, txt)
                     if x - cw * 0.5 <= mouse.x < x + cw * 2.5 and y <= mouse.y < y + lh:
                         hover_addr = a
             else:
@@ -530,11 +531,11 @@ class MemoryView:
                     elif any(self.changed(a + k) for k in range(ws)):
                         dl.add_rect_filled(ImVec2(x - 2, y), ImVec2(x + word_w * cw + 2, y + lh), u32(th.red, 0.28), 3)
                     if v is None:
-                        dl.add_text(ImVec2(x, y), dim, "0x" + "?" * (2 * ws))
+                        dl.add_text(ImVec2(x, y + dy), dim, "0x" + "?" * (2 * ws))
                     else:
                         vp = app.page_for(v)
                         c = u32(th.kind_color(vp[5])) if vp else (dim if v == 0 else fg)
-                        dl.add_text(ImVec2(x, y), c, f"{v:#0{word_w}x}")
+                        dl.add_text(ImVec2(x, y + dy), c, f"{v:#0{word_w}x}")
                     if x <= mouse.x < x + word_w * cw and y <= mouse.y < y + lh:
                         hover_addr = a
                         hover_word = v
@@ -543,7 +544,7 @@ class MemoryView:
             for i in range(bpr):
                 b = self.byte_at(addr + i)
                 chars.append("·" if b is None or not 0x20 <= b < 0x7F else chr(b))
-            dl.add_text(ImVec2(ascii_x, y), dim, "".join(chars))
+            dl.add_text(ImVec2(ascii_x, y + dy), dim, "".join(chars))
             for i in range(bpr):
                 if addr + i == self.sel:
                     dl.add_rect_filled(ImVec2(ascii_x + i * cw, y), ImVec2(ascii_x + (i + 1) * cw, y + lh), u32(th.accent, 0.35))

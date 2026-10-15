@@ -121,3 +121,6 @@ class AppearanceMixin:
         """Must be called with the mono font pushed."""
         self.char_w = imgui.calc_text_size("M").x
         self.line_h = float(int(imgui.get_font_size() * 1.28))
+        # glyphs are drawn from the top of their line box: center them, so backgrounds
+        # (tints, selection, current line) span evenly above and below the text
+        self.text_dy = float(int((self.line_h - imgui.get_text_line_height()) / 2))

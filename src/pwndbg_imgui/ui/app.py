@@ -51,6 +51,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self._restore_layout_ini: str | None = None  # pending "restore my layout"
         self.char_w = 8.0
         self.line_h = 18.0
+        self.text_dy = 2.0
         self.mono = None
         self.mono_bold = None
         self.ui_font = None

@@ -362,12 +362,14 @@ class TextView:
                         color = u32(th.term_bg)
                     else:
                         color = th.color(fg, (0.55 if flags & DIM else 1.0) * fade)
+                    ty = y + app.text_dy
                     if flags & BOLD and bold_font is not None:
-                        dl.add_text(bold_font, font_size, ImVec2(x, y), color, text)
+                        dl.add_text(bold_font, font_size, ImVec2(x, ty), color, text)
                     else:
-                        dl.add_text(ImVec2(x, y), color, text)
+                        dl.add_text(ImVec2(x, ty), color, text)
                     if flags & UNDER:
-                        dl.add_line(ImVec2(x, y + line_h - 1), ImVec2(x + len(text) * char_w, y + line_h - 1), color)
+                        uy = y + line_h - app.text_dy - 1
+                        dl.add_line(ImVec2(x, uy), ImVec2(x + len(text) * char_w, uy), color)
 
             # breakpoint gutter
             if self.gutter is not None:
