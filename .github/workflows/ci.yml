@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install pytest pyflakes
+      - name: Lint
+        run: python -m pyflakes $(find src/pwndbg_imgui tools tests -name '*.py')
+      # the tested modules are stdlib-only: no imgui-bundle or display needed
+      - name: Unit tests
+        run: python -m pytest -v
+
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # hatch-vcs derives the version from git tags
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the package (as pipx would)
+        run: pip install .
+      - name: Smoke-test the entry point
+        run: |
+          pwndbg-imgui --version
+          pwndbg-imgui --help > /dev/null
+          pwndbg-imgui --exploit | grep -q "from pwn import"  # template shipped as package data
+          test -f "$(pwndbg-imgui --agent-path)"
+          python -c "import pwndbg_imgui.ui.app"  # the GUI imports with imgui-bundle installed

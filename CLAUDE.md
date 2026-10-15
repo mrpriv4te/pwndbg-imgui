@@ -70,8 +70,17 @@ ChromeMixin)`; `ui/app.py` holds the core methods, the others are the mixins.
 ## Dev workflow
 
 - Install for development: `pipx install -e .` (gives the `pwndbg-imgui` command).
-- Lint: `python -m pyflakes $(find src/pwndbg_imgui tools -name '*.py')` — keep it clean.
-  No unit test suite (see "Testing the GUI"). `.tmpl` isn't a module (ignore its `from pwn import *` warnings).
+- Lint: `python -m pyflakes $(find src/pwndbg_imgui tools tests -name '*.py')` — keep it clean.
+- Unit tests: `python -m pytest` (`tests/`, config in `pyproject.toml`). They cover the
+  stdlib-only modules (`term`, `payload`, `cli`, `settings`, agent helpers) and need no
+  imgui-bundle or display. `test_agent.py` enforces the agent's stdlib-only rule. Add a
+  test with any change to those modules; GUI behavior is checked with `tools/guitest.py`.
+- CI (`.github/workflows/ci.yml`): lint + pytest on Python 3.10–3.14, plus a packaging
+  job (`pip install .`, entry-point smoke checks). It doesn't run the GUI.
+- Debugging: `--debug` / `PWNDBG_IMGUI_DEBUG=1` logs every swallowed exception (GUI and
+  agent side) with a traceback to `~/.cache/pwndbg-imgui-debug.log` via `agent.debug()`.
+  When adding an `except Exception` that hides an error, call `debug("<where>")` in it.
+- Not on PyPI: install from a clone or `pipx install git+https://github.com/mrpriv4te/pwndbg-imgui`. `.tmpl` isn't a module (ignore its `from pwn import *` warnings).
 - Config lives in `~/.config/pwndbg-imgui/` (`settings.json`, `layout.ini`).
 - Versioning is **git tags via hatch-vcs** — never hardcode a version. `__version__`
   resolves from `importlib.metadata` / the generated `_version.py` (gitignored). Release =
@@ -146,7 +155,7 @@ Gotchas when testing:
 
 ## Release checklist
 
-1. Lint clean (pyflakes, command above).
+1. Lint clean and `pytest` green (commands above); CI green on `main`.
 2. `tools/guitest.py` smoke run passes; look at the screenshots.
 3. Commit (only when asked), then `git tag vX.Y.Z` and push the branch **and** the tag.
 
