@@ -11,7 +11,7 @@ from .. import APP_NAME, __version__
 from ..settings import Settings
 from ..theme import THEMES, Theme, mix, u32
 from .catalog import TOOL_PRESETS
-from .widgets import ansi_inline, v4, vsep
+from .widgets import ansi_inline, begin_table_card, end_table_card, v4, vsep
 
 
 class ChromeMixin:
@@ -365,6 +365,7 @@ class ChromeMixin:
 
     def status_bar(self) -> None:
         th = self.theme
+        imgui.align_text_to_frame_padding()
         st = self.state
         parts = []
         f = st.get("file") or self.info.get("file")
@@ -541,15 +542,16 @@ class ChromeMixin:
                 ("Tab / Up / Down (console)", "Complete / history; empty Enter repeats the last command"),
                 ("Ctrl+L (console)", "Clear console"),
             ]
-            if imgui.begin_table("##keys", 2, imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h
-                                                    | imgui.TableFlags_.pad_outer_x):
+            began = begin_table_card(self, "##keys", 2, imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h
+                                     | imgui.TableFlags_.pad_outer_x, fit=True)
+            if began:
                 for k, d in rows:
                     imgui.table_next_row()
                     imgui.table_next_column()
                     imgui.text_colored(v4(self.theme.accent), k)
                     imgui.table_next_column()
                     imgui.text_unformatted(d)
-                imgui.end_table()
+            end_table_card(began)
             done = imgui.button("Close") or imgui.is_key_pressed(imgui.Key.escape)
         else:
             hints = {

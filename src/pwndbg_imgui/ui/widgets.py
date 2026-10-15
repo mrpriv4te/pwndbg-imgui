@@ -10,7 +10,7 @@ from imgui_bundle import ImVec2, ImVec4, imgui
 from imgui_bundle import icons_fontawesome_6 as fa
 
 from ..term import _STYLES, BOLD, CTRL, DIM, ECHO, INVERSE, UNDER, Term, strip_ansi
-from ..theme import u32
+from ..theme import mix, u32
 from .catalog import SECTION_META
 
 ADDR_RE = re.compile(r"\b0x[0-9a-fA-F]{4,16}\b")
@@ -35,6 +35,33 @@ def buttons_width(*labels: str) -> float:
     """Room taken by buttons placed after an item with same_line()."""
     st = imgui.get_style()
     return sum(imgui.calc_text_size(lbl.split("##")[0]).x + st.frame_padding.x * 2 + st.item_spacing.x for lbl in labels)
+
+
+def begin_table_card(app, str_id: str, columns: int, flags: int, height: float = 0.0,
+                     fit: bool = False) -> bool:
+    """A table in a rounded "card" that stands out from the pane (ImGui tables can't round
+    their corners, so a child window does, padded so rows stay inside the curve).
+    height 0 fills the space left; fit=True sizes the card to its rows instead.
+    Always call end_table_card(result), whatever this returns."""
+    th = app.theme
+    imgui.push_style_var(imgui.StyleVar_.child_rounding, 6.0)
+    imgui.push_style_var(imgui.StyleVar_.window_padding, ImVec2(5, 5))
+    imgui.push_style_color(imgui.Col_.child_bg, v4(mix(th.panel, th.fg, 0.05)))
+    imgui.push_style_color(imgui.Col_.border, v4(mix(th.border, th.fg, 0.08)))
+    child_flags = imgui.ChildFlags_.borders | imgui.ChildFlags_.always_use_window_padding
+    if fit:
+        child_flags |= imgui.ChildFlags_.auto_resize_y
+        flags &= ~imgui.TableFlags_.scroll_y  # the card grows with the rows instead
+    imgui.begin_child(f"{str_id}_card", ImVec2(0, 0 if fit else height), child_flags)
+    imgui.pop_style_color(2)
+    imgui.pop_style_var(2)
+    return imgui.begin_table(str_id, columns, flags)
+
+
+def end_table_card(began: bool) -> None:
+    if began:
+        imgui.end_table()
+    imgui.end_child()
 
 
 def combo_width(longest: str) -> float:
@@ -308,9 +335,11 @@ class TextView:
                 for i in range(first, last):
                     y = oy + i * line_h
                     for c0, c1, tint in self.row_tint(lines[i].text) or ():
-                        x0 = win_pos.x if c0 == 0 else tx + (c0 - 0.5) * char_w
-                        x1 = clip_r if c1 is None else tx + (c1 + 0.5) * char_w
-                        dl.add_rect_filled(ImVec2(x0, y), ImVec2(x1, y + line_h), tint)
+                        if c1 is None:  # the whole row, edge to edge (like the current line)
+                            dl.add_rect_filled(ImVec2(win_pos.x, y), ImVec2(clip_r, y + line_h), tint)
+                        else:  # one cell: pad it like text, with rounded corners
+                            x0, x1 = tx + (c0 - 0.6) * char_w, tx + (c1 + 0.6) * char_w
+                            dl.add_rect_filled(ImVec2(x0, y + 1), ImVec2(x1, y + line_h - 1), tint, 3.0)
 
             # search matches
             if self.search_open and self.search_text:

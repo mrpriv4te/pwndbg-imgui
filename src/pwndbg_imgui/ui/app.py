@@ -789,7 +789,9 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         rp.imgui_window_params.show_menu_bar = True
         rp.imgui_window_params.show_menu_app = False
         rp.imgui_window_params.show_menu_view = False
-        rp.imgui_window_params.show_status_bar = True
+        # the status bar is an edge toolbar like the top one (hello_imgui's own status bar
+        # has its own rounded/outlined style)
+        rp.imgui_window_params.show_status_bar = False
         rp.imgui_window_params.show_status_fps = False
         rp.imgui_window_params.remember_status_bar_settings = False
         rp.imgui_window_params.remember_theme = False
@@ -805,13 +807,14 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         cb.load_additional_fonts = self.load_fonts
         cb.setup_imgui_style = self.setup_style
         cb.show_menus = self.show_menus
-        cb.show_status = self.status_bar
         cb.show_gui = self.show_gui
         cb.pre_new_frame = self.pre_new_frame
         cb.post_init = self.post_init
         cb.before_exit = self.before_exit
         opts = hello_imgui.EdgeToolbarOptions(size_em=2.35, window_padding_em=ImVec2(0.5, 0.25))
         cb.add_edge_toolbar(hello_imgui.EdgeToolbarType.top, self.toolbar, opts)
+        status = hello_imgui.EdgeToolbarOptions(size_em=1.6, window_padding_em=ImVec2(0.6, 0.2))
+        cb.add_edge_toolbar(hello_imgui.EdgeToolbarType.bottom, self.status_bar, status)
 
         D = hello_imgui.DockingSplit
         rp.docking_params.docking_splits = [

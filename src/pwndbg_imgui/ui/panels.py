@@ -13,7 +13,7 @@ from ..term import ECHO, strip_ansi
 from ..theme import THEMES
 from .panes import BreakpointsPane, HeapPane, VmmapPane
 from .views import DecompView
-from .widgets import buttons_width, combo_width, help_marker, v4
+from .widgets import begin_table_card, buttons_width, combo_width, end_table_card, help_marker, v4
 
 
 class PanelsMixin:
@@ -79,6 +79,7 @@ class PanelsMixin:
                 imgui.end_tooltip()
         running = self.is_running()
         icon = fa.ICON_FA_PERSON_RUNNING if running else fa.ICON_FA_ANGLES_RIGHT
+        imgui.align_text_to_frame_padding()  # center the icon on the input box's line
         imgui.text_colored(v4(th.green if running else th.accent), icon)
         imgui.same_line()
         imgui.set_next_item_width(-1)
@@ -398,7 +399,9 @@ class PanelsMixin:
         flt = self.cfg_filter.lower().strip()
         flags = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.pad_outer_x
                  | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable)
-        if not imgui.begin_table("##cfg", 3, flags):
+        began = begin_table_card(self, "##cfg", 3, flags)
+        if not began:
+            end_table_card(began)
             return
         imgui.table_setup_scroll_freeze(0, 1)
         imgui.table_setup_column("Parameter", imgui.TableColumnFlags_.width_fixed, imgui.get_font_size() * 14)
@@ -425,7 +428,7 @@ class PanelsMixin:
             imgui.pop_font()
             imgui.table_next_column()
             imgui.text_disabled(p["doc"])
-        imgui.end_table()
+        end_table_card(began)
 
     def _set_config(self, cfg) -> None:
         self.config = cfg

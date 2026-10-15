@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 from imgui_bundle import imgui
 from imgui_bundle import icons_fontawesome_6 as fa
-from .widgets import buttons_width, v4
+from .widgets import begin_table_card, buttons_width, end_table_card, v4
 
 if TYPE_CHECKING:
     from .app import App
@@ -54,7 +54,8 @@ class VmmapPane:
             imgui.text_disabled("The memory map appears once the program is stopped.")
             return
         imgui.push_font(app.mono, app.code_size)
-        if imgui.begin_table("##vmmap", 6, TABLE_FLAGS):
+        began = begin_table_card(app, "##vmmap", 6, TABLE_FLAGS)
+        if began:
             imgui.table_setup_scroll_freeze(0, 1)
             for col in ("Start", "End", "Size", "Perm", "Offset"):
                 imgui.table_setup_column(col)
@@ -90,7 +91,7 @@ class VmmapPane:
                 if objfile.startswith("/"):
                     imgui.set_item_tooltip(objfile)
                 imgui.pop_style_color()
-            imgui.end_table()
+        end_table_card(began)
         imgui.pop_font()
 
     def _menu(self, start: int, end: int, objfile: str) -> None:
@@ -124,7 +125,8 @@ class BreakpointsPane:
         if not self.app.bps:
             imgui.text_disabled("No breakpoints. Click the gutter of Disassembly/Source, or add one above.")
             return
-        if imgui.begin_table("##bps", 7, TABLE_FLAGS):
+        began = begin_table_card(self.app, "##bps", 7, TABLE_FLAGS)
+        if began:
             imgui.table_setup_scroll_freeze(0, 1)
             for col in ("", "#", "Type", "Where", "Address", "Hits"):
                 imgui.table_setup_column(col)
@@ -132,7 +134,7 @@ class BreakpointsPane:
             imgui.table_headers_row()
             for b in self.app.bps:
                 self._row(b)
-            imgui.end_table()
+        end_table_card(began)
 
     def _add_bar(self) -> None:
         buttons_w = buttons_width(*(k[1] for k in self.KINDS))
@@ -264,7 +266,7 @@ class HeapPane:
         imgui.text_disabled(f"{'main_arena' if d['main'] else 'arena'} {d['arena']:#x} · {len(chunks)} chunks"
                             f" · {free} free" + (" · truncated" if d["truncated"] else ""))
         avail = imgui.get_content_region_avail()
-        bins_h = min(avail.y * 0.4, imgui.get_text_line_height_with_spacing() * (len(d["bins"]) + 2.5))
+        bins_h = min(avail.y * 0.4, imgui.get_text_line_height_with_spacing() * (len(d["bins"]) + 1.5) + 16)
         imgui.push_font(app.mono, app.code_size)
         self._chunks(chunks, max(60.0, avail.y - bins_h - imgui.get_style().item_spacing.y))
         self._bins(d["bins"], {c["addr"] for c in chunks})
@@ -272,7 +274,9 @@ class HeapPane:
 
     def _chunks(self, chunks: list, height: float) -> None:
         app = self.app
-        if not imgui.begin_table("##heapchunks", 4, TABLE_FLAGS, imgui.ImVec2(0, height)):
+        began = begin_table_card(app, "##heapchunks", 4, TABLE_FLAGS, height)
+        if not began:
+            end_table_card(began)
             return
         imgui.table_setup_scroll_freeze(0, 1)
         for col in ("Chunk", "Size", "Flags"):
@@ -299,14 +303,16 @@ class HeapPane:
             imgui.table_next_column()
             imgui.text_unformatted(self.STATE_NAMES.get(state, "") if state else "in use")
             imgui.pop_style_color()
-        imgui.end_table()
+        end_table_card(began)
 
     def _bins(self, bins: list, chunk_addrs: set) -> None:
         app = self.app
         if not bins:
             imgui.text_disabled("All bins are empty.")
             return
-        if not imgui.begin_table("##heapbins", 3, TABLE_FLAGS):
+        began = begin_table_card(app, "##heapbins", 3, TABLE_FLAGS, fit=True)
+        if not began:
+            end_table_card(began)
             return
         for col in ("Bin", "Count"):
             imgui.table_setup_column(col)
@@ -336,4 +342,4 @@ class HeapPane:
                         app.open_memory(a)
                 else:
                     imgui.text_disabled(f"{a:#x}")  # e.g. the bin's head inside the arena
-        imgui.end_table()
+        end_table_card(began)
