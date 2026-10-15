@@ -37,6 +37,34 @@ all while keeping the gdb console one keystroke away.
 
 ## 📦 Installation
 
+### 1. pwndbg
+
+pwndbg-imgui is a front-end for your existing **pwndbg** + **gdb**, so install pwndbg first
+([official guide](https://pwndbg.re/stable/setup/)). The recommended methods — the install
+script, `uv`, Homebrew, Nix, or a distro package — all give you a **`pwndbg` command**:
+
+```bash
+# official install script (latest portable release), user-only:
+curl --proto '=https' --tlsv1.2 -LsSf 'https://install.pwndbg.re' | sh -s -- -t pwndbg-gdb -u
+```
+
+> [!TIP]
+> If `pwndbg` is on your `PATH`, pwndbg-imgui uses it automatically — nothing else to set up.
+> With a classic "`source .../gdbinit.py` in `~/.gdbinit`" install it also works: pwndbg-imgui
+> then runs plain `gdb` and lets your gdbinit load pwndbg (or a user-defined `init-pwndbg`
+> command, or a known path like `~/.local/share/pwndbg`). Override with `--gdb PATH`,
+> `--pwndbg PATH`, or `--init-cmd CMD`.
+
+Quick check (any one of these should print a `Pwndbg: 2026.xx.xx …` line):
+
+```bash
+pwndbg -q -batch -ex 'version'                   # a `pwndbg` launcher is installed
+gdb   -q -batch -ex 'version'                    # pwndbg auto-loaded by your gdbinit
+gdb   -q -batch -ex 'init-pwndbg' -ex 'version'  # manual `init-pwndbg` command
+```
+
+### 2. pwndbg-imgui
+
 With [pipx](https://pipx.pypa.io), in its own environment (imgui-bundle included):
 
 ```bash
@@ -46,29 +74,6 @@ pipx upgrade pwndbg-imgui      # after a `git pull` (without -e: `pipx install -
 ```
 
 The `pwndbg-imgui` command is then available (`python -m pwndbg_imgui` works too).
-
-> [!NOTE]
-> pwndbg must be installed. It is loaded, in order: from your `gdbinit` if it already does
-> so → a user-defined `init-pwndbg` command → `$PWNDBG_PATH`, `~/.local/share/pwndbg`,
-> `~/pwndbg`, `/usr/share/pwndbg`… (or explicitly: `--pwndbg ~/path/pwndbg`,
-> `--init-cmd init-pwndbg`).
-
-### Check pwndbg
-
-Make sure gdb can load pwndbg:
-
-```bash
-# if your gdbinit loads pwndbg automatically:
-gdb -q -batch -ex 'version'
-
-# if you load it manually (a user-defined `init-pwndbg` command):
-gdb -q -batch -ex 'init-pwndbg' -ex 'version'
-```
-
-Either should print a line like `Pwndbg: 2026.07.29 …`. If instead you get
-`Undefined command: "version"`, pwndbg isn't being loaded — install it (see
-[pwndbg.re](https://pwndbg.re)) or point pwndbg-imgui at it with `--pwndbg PATH`
-/ `--init-cmd init-pwndbg`.
 
 ---
 
@@ -218,7 +223,8 @@ re-applied each run (toggle in the Config pane or with `persist_pwndbg_config`).
 Two modes, one agent on the gdb side:
 
 - **Launched by the GUI** (`pwndbg-imgui ./chall`) — the GUI creates one PTY for the gdb
-  console and one for the program, then starts gdb and has it load `agent.py`.
+  console and one for the program, then starts the debugger (the `pwndbg` launcher if
+  present, else `gdb`) and has it load `agent.py`.
 - **Attached** (`init-pwndbg-imgui`) — gdb keeps its terminal; `agent.attach()` launches the
   GUI and hands it a `socketpair`. Closing the GUI gives the context back to the terminal.
 

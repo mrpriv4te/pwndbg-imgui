@@ -48,12 +48,21 @@ SECTION_LINES_PARAM = {
 CLEAR_SEQ = "\x1b[H\x1b[2J"
 
 
+# Where a source/classic pwndbg install keeps gdbinit.py. The modern installs
+# (install script, uv, Homebrew, Nix, distro packages) ship a `pwndbg` launcher
+# that the GUI prefers, so these are only the raw-`gdb` fallback.
 PWNDBG_CANDIDATE_PATHS = (
     "~/.local/share/pwndbg/gdbinit.py",
     "~/pwndbg/gdbinit.py",
     "~/tools/pwndbg/gdbinit.py",
     "/usr/share/pwndbg/gdbinit.py",
+    "/usr/local/share/pwndbg/gdbinit.py",
     "/opt/pwndbg/gdbinit.py",
+)
+PWNDBG_CANDIDATE_GLOBS = (
+    "~/.local/share/uv/tools/pwndbg/share/pwndbg/gdbinit.py",
+    "~/.local/lib/pwndbg-gdb/*/share/pwndbg/gdbinit.py",
+    "/usr/local/lib/pwndbg-gdb/*/share/pwndbg/gdbinit.py",
 )
 
 
@@ -155,6 +164,13 @@ class Agent:
             for path in PWNDBG_CANDIDATE_PATHS:
                 path = os.path.expanduser(path)
                 if os.path.exists(path):
+                    candidates.append(("source", path))
+            # Modern installs (install script, uv tool) put gdbinit.py under a
+            # versioned/opaque prefix; glob for it as a last resort.
+            import glob
+
+            for pattern in PWNDBG_CANDIDATE_GLOBS:
+                for path in sorted(glob.glob(os.path.expanduser(pattern))):
                     candidates.append(("source", path))
 
         # gdb only sets __file__ for the outermost sourced script; pwndbg's

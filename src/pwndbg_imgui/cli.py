@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 import sys
 
 from . import APP_NAME
@@ -10,9 +11,24 @@ from .settings import config_dir
 from .theme import THEMES
 
 
+def default_debugger() -> str:
+    """Pick the debugger binary to launch.
+
+    The modern pwndbg installs (install script, uv tool, Homebrew, Nix, distro
+    packages) provide a `pwndbg` launcher: a gdb-compatible binary with pwndbg
+    already loaded — the same thing pwntools uses via `context.gdb_binary`.
+    Prefer it so pwndbg-imgui works out of the box; fall back to plain `gdb`
+    (the agent then loads pwndbg from your gdbinit / init-pwndbg / known paths).
+    """
+    env = os.environ.get("PWNDBG_IMGUI_GDB")
+    if env:
+        return env
+    return shutil.which("pwndbg") or "gdb"
+
+
 class LaunchConfig:
     def __init__(self) -> None:
-        self.gdb = os.environ.get("PWNDBG_IMGUI_GDB", "gdb")
+        self.gdb = default_debugger()
         self.init = "auto"
         self.gdb_args: list[str] = []
         self.binary: str | None = None
@@ -68,8 +84,9 @@ to gdb as-is, so it works like `pwndbg`:
   %(prog)s -ex 'target remote :1234' ./binary
 
 GUI options:
-  --gdb PATH          gdb executable (default: $PWNDBG_IMGUI_GDB or `gdb`)
-  --pwndbg PATH       pwndbg's gdbinit.py, if your gdbinit does not load pwndbg
+  --gdb PATH          debugger binary (default: $PWNDBG_IMGUI_GDB, else the
+                      `pwndbg` launcher if on PATH, else `gdb`)
+  --pwndbg PATH       pwndbg's gdbinit.py, if your gdb does not load pwndbg
   --init-cmd CMD      gdb command that loads pwndbg (e.g. init-pwndbg)
   --no-pwndbg         do not try to load pwndbg
   --theme NAME        color theme ({", ".join(THEMES)})
