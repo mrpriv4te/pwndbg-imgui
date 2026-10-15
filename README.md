@@ -208,7 +208,8 @@ a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
 - **🪄 Comfort** — one search box / command palette (<kbd>Ctrl</kbd>+<kbd>P</kbd>): type an
   address, symbol or expression to open it in Memory, disassemble or telescope it, or find any
   command, view, window or theme; toolbar
-  (Run/Start/Continue/Pause/Step…), status bar (pid, arch, checksec, legend), notifications
+  (Run/Start/Continue/Pause, instruction and source-line steps (the latter when the code has
+  debug info), refresh context), status bar (pid, arch, checksec, legend), notifications
   (breakpoint, signal, exit).
 - **🎨 Appearance** — 13 themes (dark and light, contrast auto-corrected), a themed title bar
   (drag to move, double-click to maximize: moves go through the window manager, so the

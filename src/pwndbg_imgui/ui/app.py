@@ -456,6 +456,14 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
                 if v.auto and v.ran_gen != -1:
                     v.refresh()
 
+    def refresh_all(self) -> None:
+        """Redraw pwndbg's context and refetch every pane's data, as after a stop."""
+        if not self.is_stopped() or not self.rpc:
+            return
+        self.dirty_gen += 1  # the panes refetch when it changes
+        self.rpc.request("context")
+        self.on_state({"state": self.state})  # vmmap, memory, decompiler, command views
+
     def on_stop(self, msg) -> None:
         self.dirty_gen += 1
         for name in self.section_extra:

@@ -20,6 +20,7 @@ class ChromeMixin:
     def actions(self) -> list[tuple]:
         """(label, icon, shortcut, enabled, callback) for toolbar/menu/palette."""
         alive, stopped, running = self.is_alive(), self.is_stopped(), self.is_running()
+        source = stopped and bool(self.state.get("src"))  # the frame has line info (built with -g)
         sc = self.send_console
         return [
             ("Run", "PLAY", "Ctrl+F5", not running, lambda: sc("run")),
@@ -30,10 +31,11 @@ class ChromeMixin:
             ("Pause", "PAUSE", "F6", running, self.interrupt),
             ("Step into (si)", "ARROW_TURN_DOWN", "F7", stopped, lambda: sc("si")),
             ("Step over (ni)", "ARROW_RIGHT_FROM_BRACKET", "F8", stopped, lambda: sc("ni")),
-            ("Step source line (step)", "ARROW_TURN_DOWN", "Shift+F7", stopped, lambda: sc("step")),
-            ("Next source line (next)", "ARROW_RIGHT_FROM_BRACKET", "Shift+F8", stopped, lambda: sc("next")),
+            ("Step source line (step)", "TURN_DOWN", "Shift+F7", source, lambda: sc("step")),
+            ("Next source line (next)", "ARROW_DOWN_LONG", "Shift+F8", source, lambda: sc("next")),
             ("Step out (finish)", "ARROW_UP_FROM_BRACKET", "Ctrl+F7", stopped, lambda: sc("finish")),
             ("Kill", "SKULL", "Shift+F5", alive and not running, lambda: sc("kill")),
+            ("Refresh context", "ARROWS_ROTATE", "", stopped, self.refresh_all),
         ]
 
     def stepping_extras(self) -> list[tuple[str, str]]:
@@ -297,7 +299,8 @@ class ChromeMixin:
         tool = [
             ("Run", th.green), ("Start (break at main)", th.green), ("Continue", th.green),
             ("Pause", th.yellow), None, ("Step into (si)", th.cyan), ("Step over (ni)", th.cyan),
-            ("Step out (finish)", th.cyan), None, ("Kill", th.red),
+            ("Step out (finish)", th.cyan), None, ("Step source line (step)", th.blue),
+            ("Next source line (next)", th.blue), None, ("Kill", th.red), None, ("Refresh context", th.fg),
         ]
         actions = {a[0]: a for a in self.actions()}
         imgui.set_cursor_pos_y(imgui.get_cursor_pos_y() + 1)
@@ -314,7 +317,10 @@ class ChromeMixin:
             imgui.pop_style_color()
             imgui.end_disabled()
             if imgui.is_item_hovered(imgui.HoveredFlags_.allow_when_disabled | imgui.HoveredFlags_.delay_short):
-                imgui.set_tooltip(f"{label}  [{shortcut}]" if shortcut else label)
+                tip = f"{label}  [{shortcut}]" if shortcut else label
+                if not enabled and self.is_stopped() and label.endswith(("(step)", "(next)")):
+                    tip += "\nNo source for this frame (the code wasn't built with -g)"
+                imgui.set_tooltip(tip)
             imgui.same_line()
         imgui.begin_disabled(not self.is_stopped())
         if imgui.button(f"{fa.ICON_FA_ANGLES_RIGHT} {fa.ICON_FA_CARET_DOWN}##tbmore"):
