@@ -89,6 +89,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.layout_sent = None
         self.layout_pending = (None, 0.0)
         self.exiting = False
+        self.exit_signal = 0  # SIGINT/SIGTERM received: close at the next frame
         self.section_extra: dict[str, int] = {"stack": 0}
         self.load_more_t = 0.0
         self.gdb_idle = False  # True while gdb sits at its prompt
@@ -609,6 +610,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.process_inbox()
         if self.proc is not None and self.proc.poll() is not None and not self.exiting:
             hello_imgui.get_runner_params().app_shall_exit = True
+        if self.exit_signal:
+            hello_imgui.get_runner_params().app_shall_exit = True
         if self._restore_layout_ini is not None:
             imgui.load_ini_settings_from_memory(self._restore_layout_ini)
             self._restore_layout_ini = None
@@ -819,17 +822,38 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         rp.docking_params.main_dock_space_node_flags = imgui.DockNodeFlags_.none
         return rp
 
-    def run(self) -> None:
-        if self.attached:
-            self.rpc = Rpc(socket.socket(fileno=self.cfg.attach_fd))
-        else:
-            self.spawn_gdb()
-        rp = self.build_runner()
+    def on_exit_signal(self, signum, _frame) -> None:
+        """Ctrl-C / SIGTERM in the launching terminal: close like the window's close
+        button (settings saved, gdb stopped). A second Ctrl-C forces it."""
+        import signal
+
+        if self.exit_signal:
+            signal.signal(signal.SIGINT, signal.SIG_DFL)  # a third one kills outright
+            raise KeyboardInterrupt
+        self.exit_signal = signum
+        hint = " (Ctrl-C again to force)" if signum == signal.SIGINT else ""
+        print(f"\n{APP_NAME}: closing...{hint}", file=sys.stderr)
+
+    def run(self) -> int:
+        """Run until the window closes; returns the process exit status."""
+        import signal
+
+        previous = {s: signal.signal(s, self.on_exit_signal) for s in (signal.SIGINT, signal.SIGTERM)}
+        rp = None
         try:
+            if self.attached:
+                self.rpc = Rpc(socket.socket(fileno=self.cfg.attach_fd))
+            else:
+                self.spawn_gdb()
+            rp = self.build_runner()
             hello_imgui.run(rp)
         finally:
             self.shutdown()
-            sanitize_window_geometry(rp.ini_filename)  # e.g. closed while minimized
+            if rp is not None:
+                sanitize_window_geometry(rp.ini_filename)  # e.g. closed while minimized
+            for s, handler in previous.items():
+                signal.signal(s, handler)
+        return 128 + self.exit_signal if self.exit_signal else 0
 
 
 def sanitize_window_geometry(ini_path: str) -> None:

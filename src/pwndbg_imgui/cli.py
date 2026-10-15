@@ -233,5 +233,7 @@ def main(argv: list[str] | None = None) -> int:
     except ImportError as e:
         print(f"{APP_NAME}: cannot load the GUI ({e}); install with: pipx install pwndbg-imgui", file=sys.stderr)
         return 1
-    App(cfg).run()
-    return 0
+    try:
+        return App(cfg).run()
+    except KeyboardInterrupt:  # forced (second Ctrl-C); cleanup already ran
+        return 130

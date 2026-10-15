@@ -20,7 +20,8 @@ scope; an exception fails the run), `shot` (screenshot), `quit`. Blank lines and
 
 Needs an interpreter with pwndbg_imgui importable plus numpy, e.g. the pipx env
 after `pipx inject pwndbg-imgui numpy`. Config goes to a fresh temporary
-XDG_CONFIG_HOME unless --keep-config. Exit status is 1 if a `py` step failed.
+XDG_CONFIG_HOME unless --keep-config. Exit status is 1 if a `py` step failed or the
+app closed before the last step, else the app's own (e.g. 130 after a SIGINT step).
 """
 
 from __future__ import annotations
@@ -139,13 +140,11 @@ def main(argv: list[str]) -> int:
             elif kind == "quit":
                 hello_imgui.get_runner_params().app_shall_exit = True
 
-    def patched_run(self) -> None:
-        if self.attached:
-            import socket
-            self.rpc = app_mod.Rpc(socket.socket(fileno=self.cfg.attach_fd))
-        else:
-            self.spawn_gdb()
-        rp = self.build_runner()
+    build_runner = App.build_runner
+
+    def patched_build_runner(self):
+        # hook the runner rather than App.run, so the real run() (signals, shutdown) is exercised
+        rp = build_runner(self)
         rp.app_window_params.restore_previous_geometry = False
         rp.app_window_params.window_geometry.size = (1600, 960)
         pre = rp.callbacks.pre_new_frame
@@ -161,15 +160,14 @@ def main(argv: list[str]) -> int:
         rp.callbacks.pre_new_frame = pre_new_frame
         rp.callbacks.after_swap = after_swap
         rp.fps_idling.enable_idling = False  # keep frames (and the step clock) ticking
-        try:
-            hello_imgui.run(rp)
-        finally:
-            self.shutdown()
-            app_mod.sanitize_window_geometry(rp.ini_filename)
-        screenshot("final", hello_imgui.final_app_window_screenshot())
+        return rp
 
-    App.run = patched_run
-    rc = cli.main(gui_args) or 0
+    App.build_runner = patched_build_runner
+    rc = cli.main(gui_args)
+    screenshot("final", hello_imgui.final_app_window_screenshot())
+    if run["i"] < len(steps):
+        print(f"guitest: exited before step {run['i'] + 1}/{len(steps)} (exit status {rc})", file=sys.stderr)
+        run["failed"] = True
     return 1 if run["failed"] else rc
 
 
