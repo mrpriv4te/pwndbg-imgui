@@ -343,3 +343,198 @@ class HeapPane:
                 else:
                     imgui.text_disabled(f"{a:#x}")  # e.g. the bin's head inside the arena
         end_table_card(began)
+
+
+class StopRefreshed:
+    """Data fetched from the agent once per stop, and only while the pane is drawn."""
+
+    OP = ""  # agent op returning the data
+
+    def __init__(self, app: App) -> None:
+        self.app = app
+        self.data: dict | None = None
+        self.error = ""
+        self.fetched_gen = -1  # App.dirty_gen of the data shown
+        self.pending = False
+
+    def invalidate(self) -> None:
+        """Refetch at the next draw (e.g. after selecting another frame or thread)."""
+        self.fetched_gen = -1
+
+    def refresh_if_stale(self) -> None:
+        app = self.app
+        if not app.rpc or not app.is_stopped() or self.pending or self.fetched_gen == app.dirty_gen:
+            return
+        self.pending = True
+        self.fetched_gen = app.dirty_gen
+
+        def done(res) -> None:
+            self.pending = False
+            self.error, self.data = res.get("error", ""), res
+
+        def fail(err: str) -> None:
+            self.pending = False
+            self.error, self.data = err, None
+
+        app.rpc.request(self.OP, done, fail)
+
+    def location_cell(self, entry: dict) -> None:
+        """function / symbol, then source file:line or module, dimmed."""
+        th = self.app.theme
+        imgui.text_colored(v4(th.fg), entry.get("sym") or entry.get("func") or "??")
+        where = (f"{os.path.basename(entry['file'])}:{entry['line']}" if entry.get("file")
+                 else entry.get("module") or "")
+        if where:
+            imgui.same_line()
+            imgui.text_disabled(where)
+            if entry.get("file"):
+                imgui.set_item_tooltip(f"{entry['file']}:{entry['line']}")
+
+    def address_cell(self, addr: int) -> None:
+        app = self.app
+        page = app.page_for(addr)
+        color = app.theme.kind_color(page[5]) if page else app.theme.fg
+        imgui.text_colored(v4(color), f"{addr:#x}")
+        if imgui.is_item_hovered() and imgui.get_io().key_ctrl and imgui.is_mouse_clicked(0):
+            app.open_memory(addr)
+
+
+class BacktracePane(StopRefreshed):
+    """The selected thread's call stack as a table (agent op `frames`). Click a frame to
+    select it; right-click for more."""
+
+    OP = "frames"
+
+    def gui(self) -> None:
+        app = self.app
+        self.refresh_if_stale()
+        if not app.is_stopped():
+            imgui.text_disabled("The call stack appears once the program is stopped.")
+            return
+        if self.error or self.data is None:
+            imgui.text_disabled(self.error or "Loading…")
+            return
+        frames = self.data["frames"]
+        imgui.push_font(app.mono, app.code_size)
+        began = begin_table_card(app, "##frames", 3, TABLE_FLAGS)
+        if began:
+            imgui.table_setup_scroll_freeze(0, 1)
+            imgui.table_setup_column("#")
+            imgui.table_setup_column("Address")
+            imgui.table_setup_column("Function / location", imgui.TableColumnFlags_.width_stretch)
+            imgui.table_headers_row()
+            for f in frames:
+                level = f["level"]
+                imgui.table_next_row()
+                imgui.table_next_column()
+                clicked, _ = imgui.selectable(f"{'►' if f['selected'] else ' '} {level}##fr{level}", f["selected"],
+                                              imgui.SelectableFlags_.span_all_columns
+                                              | imgui.SelectableFlags_.allow_overlap)
+                if clicked and not f["selected"]:
+                    self.select(level)
+                if imgui.begin_popup_context_item(f"##frctx{level}"):
+                    imgui.pop_font()
+                    self._menu(f)
+                    imgui.push_font(app.mono, app.code_size)
+                    imgui.end_popup()
+                imgui.table_next_column()
+                self.address_cell(f["pc"])
+                imgui.table_next_column()
+                self.location_cell(f)
+            if self.data.get("truncated"):
+                imgui.table_next_row()
+                imgui.table_next_column()
+                imgui.text_disabled("…")
+        end_table_card(began)
+        imgui.pop_font()
+
+    def select(self, level: int) -> None:
+        app = self.app
+        if app.is_stopped():
+            app.exec(f"frame {level}", quiet=True, cb=lambda _out: self.invalidate())
+
+    def _menu(self, f: dict) -> None:
+        app = self.app
+        level, pc = f["level"], f["pc"]
+        if imgui.menu_item_simple(f"{fa.ICON_FA_SHOE_PRINTS}  Select frame #{level}", "click", False, not f["selected"]):
+            self.select(level)
+        if imgui.menu_item_simple(f"{fa.ICON_FA_ARROW_UP_FROM_BRACKET}  Finish up to frame #{level}", "", False,
+                                  app.is_stopped() and level > 0):
+            app.exec(f"frame {level - 1}", refresh=False, quiet=True, cb=lambda _o: app.send_console("finish"))
+        imgui.separator()
+        if imgui.menu_item_simple(f"{fa.ICON_FA_CODE}  Disassemble at {pc:#x}"):
+            app.open_cmd_view(f"nearpc {pc:#x} 40")
+        if imgui.menu_item_simple(f"{fa.ICON_FA_MEMORY}  Memory at {pc:#x}"):
+            app.open_memory(pc)
+        if imgui.menu_item_simple(f"{fa.ICON_FA_COPY}  Copy address"):
+            imgui.set_clipboard_text(f"{pc:#x}")
+        name = f.get("sym") or f.get("func")
+        if name and imgui.menu_item_simple(f"{fa.ICON_FA_COPY}  Copy function"):
+            imgui.set_clipboard_text(name)
+
+
+class ThreadsPane(StopRefreshed):
+    """The inferior's threads as a table (agent op `threads`). Click one to switch to it."""
+
+    OP = "threads"
+    STATE_ICONS = {"stopped": fa.ICON_FA_PAUSE, "running": fa.ICON_FA_PLAY, "exited": fa.ICON_FA_XMARK}
+
+    def gui(self) -> None:
+        app = self.app
+        self.refresh_if_stale()
+        if not app.is_stopped():
+            imgui.text_disabled("Threads appear once the program is stopped.")
+            return
+        if self.error or self.data is None:
+            imgui.text_disabled(self.error or "Loading…")
+            return
+        th = app.theme
+        imgui.push_font(app.mono, app.code_size)
+        began = begin_table_card(app, "##threads", 5, TABLE_FLAGS)
+        if began:
+            imgui.table_setup_scroll_freeze(0, 1)
+            for col in ("#", "Name", "TID", "State"):
+                imgui.table_setup_column(col)
+            imgui.table_setup_column("Location", imgui.TableColumnFlags_.width_stretch)
+            imgui.table_headers_row()
+            for t in self.data["threads"]:
+                num = t["num"]
+                imgui.table_next_row()
+                imgui.table_next_column()
+                clicked, _ = imgui.selectable(f"{'►' if t['selected'] else ' '} {num}##th{num}", t["selected"],
+                                              imgui.SelectableFlags_.span_all_columns
+                                              | imgui.SelectableFlags_.allow_overlap)
+                if clicked and not t["selected"] and t["state"] == "stopped":
+                    self.select(num)
+                if imgui.begin_popup_context_item(f"##thctx{num}"):
+                    imgui.pop_font()
+                    if imgui.menu_item_simple(f"{fa.ICON_FA_ARROW_RIGHT}  Switch to thread {num}", "click", False,
+                                              not t["selected"] and t["state"] == "stopped"):
+                        self.select(num)
+                    if imgui.menu_item_simple(f"{fa.ICON_FA_COPY}  Copy TID"):
+                        imgui.set_clipboard_text(str(t["tid"]))
+                    imgui.push_font(app.mono, app.code_size)
+                    imgui.end_popup()
+                imgui.table_next_column()
+                imgui.text_unformatted(t["name"] or "")
+                imgui.table_next_column()
+                imgui.text_disabled(str(t["tid"]))
+                imgui.table_next_column()
+                color = {"stopped": th.yellow, "running": th.green}.get(t["state"], th.dim)
+                imgui.text_colored(v4(color), f"{self.STATE_ICONS.get(t['state'], '')} {t['state']}")
+                imgui.table_next_column()
+                if "pc" in t:
+                    self.address_cell(t["pc"])
+                    imgui.same_line()
+                    self.location_cell(t)
+        end_table_card(began)
+        imgui.pop_font()
+
+    def select(self, num: int) -> None:
+        app = self.app
+        if app.is_stopped():
+            def switched(_out) -> None:
+                self.invalidate()
+                app.backtrace_pane.invalidate()  # another thread, another call stack
+
+            app.exec(f"thread {num}", quiet=True, cb=switched)

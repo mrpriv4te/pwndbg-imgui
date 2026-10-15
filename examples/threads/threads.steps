@@ -1,0 +1,15 @@
+# tools/guitest.py steps for threads (see ../README.md): Backtrace and Threads tables,
+# selecting a frame and switching threads.
+2   cmd   b depth3
+3   cmd   run
+5   py    [setattr(d, "is_visible", True) or setattr(d, "focus_window_at_next_frame", True) for d in hello_imgui.get_runner_params().docking_params.dockable_windows if d.label.endswith("Backtrace")]
+7   py    f = app.backtrace_pane.data["frames"]; names = [x.get("func") for x in f]; assert names[:4] == ["depth3", "depth2", "depth1", "main"], names; assert f[0]["selected"]
+7.5 py    app.backtrace_pane.select(2)
+9   py    assert [x["level"] for x in app.backtrace_pane.data["frames"] if x["selected"]] == [2]; assert app.state.get("level") == 2, app.state
+9.5 shot  backtrace
+10  py    [setattr(d, "is_visible", True) or setattr(d, "focus_window_at_next_frame", True) for d in hello_imgui.get_runner_params().docking_params.dockable_windows if d.label.endswith("Threads")]
+12  py    t = app.threads_pane.data["threads"]; assert [x["name"] for x in t] == ["main-thread", "worker-a", "worker-b"], t; assert all(x["state"] == "stopped" for x in t)
+12.5 py   app.threads_pane.select(2)
+14  py    assert [x["num"] for x in app.threads_pane.data["threads"] if x["selected"]] == [2]; assert app.state.get("tid") == 2, app.state
+14.5 shot threads
+15  quit

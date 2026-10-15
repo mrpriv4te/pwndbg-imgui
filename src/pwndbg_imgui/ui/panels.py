@@ -24,6 +24,17 @@ class PanelsMixin:
             sec = self.sections[name]
             if not self.info.get("pwndbg") and self.connected() and self.info:
                 imgui.text_colored(v4(self.theme.yellow), "pwndbg is not loaded in gdb (see --pwndbg).")
+            table = {"backtrace": self.backtrace_pane, "threads": self.threads_pane}.get(name)
+            if table is not None:
+                as_text = name in self.settings["text_sections"]
+                if imgui.small_button(f"{fa.ICON_FA_TABLE_LIST} table##tt{name}" if as_text
+                                      else f"{fa.ICON_FA_ALIGN_LEFT} pwndbg text##tt{name}"):
+                    texts = self.settings["text_sections"]
+                    self.settings["text_sections"] = ([n for n in texts if n != name] if as_text else texts + [name])
+                imgui.set_item_tooltip("Switch between the table and pwndbg's own output")
+                if not as_text:
+                    table.gui()
+                    return
             if name == "expressions":
                 self._watch_bar()
             elif name == "heap_tracker":

@@ -1,6 +1,7 @@
 # built from source by `make` (only sources are committed)
 heap/heapdemo
 heap/heapdemo-musl
+threads/threads
 multiarch/hello-aarch64
 multiarch/hello-arm
 multiarch/hello-mips

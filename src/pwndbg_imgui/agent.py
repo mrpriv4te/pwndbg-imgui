@@ -652,6 +652,77 @@ class Agent:
         except gdb.error:
             return int(val.cast(gdb.lookup_type("long"))) & self.mask
 
+    def symbol_at(self, addr: int) -> str | None:
+        """"main+28"-style name for an address (pwndbg's resolver), or None."""
+        if self.pwndbg is None:
+            return None
+        try:
+            import pwndbg.aglib.symbol
+
+            return pwndbg.aglib.symbol.resolve_addr(addr) or None
+        except Exception:
+            debug(f"symbol_at({addr:#x})")
+            return None
+
+    def frame_info(self, frame) -> dict:
+        """Where a frame is: pc, function, symbol+offset, and source file:line or module."""
+        gdb = self.gdb
+        pc = frame.pc()
+        info: dict = {"pc": pc, "func": frame.name(), "sym": self.symbol_at(pc)}
+        sal = frame.find_sal()
+        if sal.symtab is not None:
+            info["file"], info["line"] = sal.symtab.filename, sal.line
+        else:
+            lib = gdb.solib_name(pc)  # None: the main program (or no symbols at all)
+            info["module"] = os.path.basename(lib or self.progspace_file() or "")
+        return info
+
+    def op_frames(self, limit: int = 256) -> dict:
+        """The selected thread's call stack, innermost frame first."""
+        self.require_stopped()
+        gdb = self.gdb
+        selected = gdb.selected_frame()
+        frames = []
+        frame = gdb.newest_frame()
+        while frame is not None and len(frames) < limit:
+            frames.append({"level": frame.level(), "selected": frame == selected, **self.frame_info(frame)})
+            try:
+                frame = frame.older()
+            except gdb.error:  # unwinding failed further up: show what we have
+                frame = None
+        return {"frames": frames, "truncated": frame is not None}
+
+    def op_threads(self) -> dict:
+        """The inferior's threads, with where each stopped one is. Switches to each thread
+        to read its innermost frame, then restores the selected thread and frame."""
+        gdb = self.gdb
+        current = gdb.selected_thread()
+        level = None
+        if current is not None and not current.is_running():
+            level = gdb.selected_frame().level()
+        threads = []
+        try:
+            for t in sorted(gdb.selected_inferior().threads(), key=lambda t: t.num):
+                state = "exited" if t.is_exited() else ("running" if t.is_running() else "stopped")
+                entry = {"num": t.num, "name": t.name or "", "tid": t.ptid[1] or t.ptid[2] or t.ptid[0],
+                         "state": state, "selected": t == current}
+                if state == "stopped":
+                    try:
+                        t.switch()
+                        entry.update(self.frame_info(gdb.newest_frame()))
+                    except gdb.error:
+                        debug(f"threads: frame of thread {t.num}")
+                threads.append(entry)
+        finally:
+            if current is not None and current.is_valid():
+                current.switch()
+                if level:
+                    frame = gdb.newest_frame()
+                    for _ in range(level):
+                        frame = frame.older() or frame
+                    frame.select()
+        return {"threads": threads}
+
     def op_heap(self, limit: int = 4000) -> dict:
         """The current thread's glibc heap, from pwndbg's own model: every chunk of the
         arena's heaps (address, size, flags, which bin holds it if free) and the non-empty

@@ -58,7 +58,8 @@ src/pwndbg_imgui/
     app.py        App: state, gdb process, events, hello_imgui runner (core)
     chrome.py     menus, toolbar/title/status bar, palette, dialogs (mixin)
     panels.py     tool windows: console, I/O, commands, config, cyclic… (mixin)
-    panes.py      standalone pane classes: VmmapPane, BreakpointsPane, HeapPane (type-checked)
+    panes.py      standalone pane classes: VmmapPane, BreakpointsPane, HeapPane, BacktracePane,
+                  ThreadsPane (StopRefreshed: fetched once per stop, while visible); type-checked
     sections.py   per-context-section behavior / gutters / menus (mixin)
     views.py      CmdView, DecompView, MemoryView
     widgets.py    TextView (the core text pane) + helpers

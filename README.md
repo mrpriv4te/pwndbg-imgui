@@ -156,7 +156,8 @@ pwndbg-imgui --exploit > e.py     # or to another file
 ### 🧪 Try the features
 
 [`examples/`](examples) has small programs to try each feature in seconds (`make` builds
-them): the [Heap view](examples/heap), [non-x86 targets](examples/multiarch) under qemu, and
+them): the [Heap view](examples/heap), the [Backtrace / Threads](examples/threads) tables,
+[non-x86 targets](examples/multiarch) under qemu, and
 a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
 
 ## 🖼️ Gallery
@@ -190,6 +191,10 @@ a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
 - **🔬 Memory** — region-colored hexdump / pointer-sized words (pwndbg legend), bytes changed
   since the last stop highlighted, in-place editing (type hex digits), follow an expression
   (`$sp`, `$rdi`…), value inspector.
+- **🧵 Backtrace & Threads** — tables instead of text: frames with address,
+  function+offset and `file:line` (click to select a frame, right-click to finish up to it,
+  disassemble, copy…), threads with name, TID, state and location (click to switch). A
+  button switches back to pwndbg's own output.
 - **🧱 Heap** (glibc) — every chunk of the current arena with its size, flags and state
   (in use, tcache, fastbin, unsorted, small/large bin, top), and the non-empty bins with their
   chains; addresses open in Memory. Built on pwndbg's heap model, refreshed at each stop
@@ -285,7 +290,7 @@ src/pwndbg_imgui/
     ├── app.py        state, gdb process, events, hello_imgui runner
     ├── chrome.py     menus, toolbar/title/status bar, palette, dialogs
     ├── panels.py     tool windows (console, I/O, commands, config…)
-    ├── panes.py      standalone panes (vmmap, breakpoints, heap)
+    ├── panes.py      standalone panes (vmmap, breakpoints, heap, backtrace, threads)
     ├── sections.py   per-context-section behavior
     ├── views.py      memory, decompiler and command views
     ├── widgets.py    TextView and helpers

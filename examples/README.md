@@ -6,6 +6,7 @@ committed: build them with `make` in this folder.
 | Example | Shows | Needs |
 |---|---|---|
 | [`heap/`](heap) | the **Heap** view: chunks, tcache / unsorted bins, the top chunk; the message for a non-glibc program | `cc` (and `zig` for the musl variant) |
+| [`threads/`](threads) | the **Backtrace** and **Threads** tables: selecting frames, switching threads | `cc` |
 | [`multiarch/`](multiarch) | debugging **AArch64, ARM and big-endian MIPS** targets under qemu-user: Memory view words and byte order, per-architecture registers, payloads, cyclic lookups | `zig`, `qemu-user`, `gdb-multiarch` |
 | [`creneau-serre/`](creneau-serre) | a real **CTF challenge** (404CTF 2026), with a pwntools `exploit.py` using `-d ui` | pwntools |
 

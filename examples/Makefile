@@ -1,6 +1,7 @@
 # Build the demo programs (sources only are committed; see README.md).
 #   make            everything that can be built here
 #   make heap       heap/heapdemo (native cc, glibc)
+#   make threads    threads/threads (native cc, pthreads)
 #   make heap-musl  heap/heapdemo-musl (static musl, needs zig)
 #   make multiarch  multiarch/hello-{aarch64,arm,mips} (static, needs zig)
 CC ?= cc
@@ -8,12 +9,16 @@ ZIG ?= zig
 CFLAGS = -g -O0
 ARCHES = aarch64-linux-musl arm-linux-musleabihf mips-linux-musleabi
 
-.PHONY: all heap heap-musl multiarch clean
-all: heap $(if $(shell command -v $(ZIG)),heap-musl multiarch)
+.PHONY: all heap heap-musl threads multiarch clean
+all: heap threads $(if $(shell command -v $(ZIG)),heap-musl multiarch)
 
 heap: heap/heapdemo
 heap/heapdemo: heap/heapdemo.c
 	$(CC) $(CFLAGS) -o $@ $<
+
+threads: threads/threads
+threads/threads: threads/threads.c
+	$(CC) $(CFLAGS) -pthread -o $@ $<
 
 heap-musl: heap/heapdemo-musl
 heap/heapdemo-musl: heap/heapdemo.c
@@ -25,4 +30,4 @@ multiarch/hello-%: multiarch/hello.c
 	$(ZIG) cc -target $(filter $*-%,$(ARCHES)) -static $(CFLAGS) -o $@ $< 2>&1 | grep -v "is not a recognized feature" || true
 
 clean:
-	rm -f heap/heapdemo heap/heapdemo-musl multiarch/hello-aarch64 multiarch/hello-arm multiarch/hello-mips
+	rm -f heap/heapdemo heap/heapdemo-musl threads/threads multiarch/hello-aarch64 multiarch/hello-arm multiarch/hello-mips

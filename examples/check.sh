@@ -31,6 +31,9 @@ else skipped heap "not built: make heap"; fi
 if [ -x heap/heapdemo-musl ]; then guitest heap-musl heap/heap-musl.steps heap ./heapdemo-musl
 else skipped heap-musl "not built: make heap-musl (needs zig)"; fi
 
+if [ -x threads/threads ]; then guitest threads threads/threads.steps threads ./threads
+else skipped threads "not built: make threads"; fi
+
 port=23990
 for spec in aarch64:8:little arm:4:little mips:4:big; do
     arch=${spec%%:*}
