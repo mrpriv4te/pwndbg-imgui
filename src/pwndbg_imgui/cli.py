@@ -6,7 +6,7 @@ import os
 import shutil
 import sys
 
-from . import APP_NAME
+from . import APP_NAME, __version__
 from .settings import config_dir
 from .theme import THEMES
 
@@ -105,6 +105,7 @@ GUI options:
   --exploit [PATH]    write a pwntools exploit template (./exploit.py, or PATH)
                       with the pwndbg-imgui `-d ui` integration; prints to stdout
                       when piped (pwndbg-imgui --exploit > exploit.py)
+  --version           print the pwndbg-imgui version and exit
   -h, --help          show this help
 
 By default pwndbg is loaded from your gdbinit, else with a user-defined
@@ -157,6 +158,9 @@ def parse_args(argv: list[str]) -> LaunchConfig:
                 cfg.gdb_pid = int(val)
         elif a in ("-h", "--help"):
             print(usage())
+            sys.exit(0)
+        elif a == "--version":
+            print(f"{APP_NAME} {__version__}")
             sys.exit(0)
         elif a == "--list-themes":
             print("\n".join(THEMES))

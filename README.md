@@ -91,7 +91,7 @@ pwndbg-imgui -ex 'target remote :1234' ./chall
 
 GUI options: `--gdb PATH`, `--pwndbg PATH`, `--init-cmd CMD`, `--no-pwndbg`,
 `--theme NAME`, `--font PATH`, `--font-size N`, `--no-io`, `--no-viewports`, `--maximize`,
-`--reset-layout`, `--list-themes` (see `--help`).
+`--reset-layout`, `--list-themes`, `--version` (see `--help`).
 
 ### 🔗 Attach to an existing gdb session
 
