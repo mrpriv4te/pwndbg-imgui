@@ -11,7 +11,7 @@ from .. import APP_NAME, __version__
 from ..settings import Settings
 from ..theme import THEMES, Theme, mix, u32
 from .catalog import TOOL_PRESETS
-from .widgets import ansi_inline, begin_table_card, end_table_card, v4, vsep
+from .widgets import TableCard, ansi_inline, v4, vsep
 
 
 class ChromeMixin:
@@ -370,7 +370,17 @@ class ChromeMixin:
 
     def status_bar(self) -> None:
         th = self.theme
-        imgui.align_text_to_frame_padding()
+        # a dark line on top, like the gap under the top toolbar: without it the panes' bottom
+        # padding (same color) reads as part of the bar, and its text looks low
+        sep = 2.0
+        pos, size = imgui.get_window_pos(), imgui.get_window_size()
+        imgui.get_window_draw_list().add_rect_filled(pos, ImVec2(pos.x + size.x, pos.y + sep), u32(th.bg))
+        bar_h = size.y
+
+        def center(text_h: float) -> None:  # every item on the bar's vertical middle
+            imgui.set_cursor_pos_y(sep + (bar_h - sep - text_h) / 2)
+
+        center(imgui.get_text_line_height())
         st = self.state
         parts = []
         f = st.get("file") or self.info.get("file")
@@ -398,11 +408,13 @@ class ChromeMixin:
             else:
                 c = th.red
             imgui.same_line(0, 14)
+            center(imgui.get_text_line_height())
             imgui.text_colored(v4(c), f"{k}")
             imgui.set_item_tooltip(f"{k}: {v}")
         if self.legend:
             imgui.same_line(0, 18)
             imgui.push_font(self.mono, self.ui_size * 0.9)
+            center(imgui.get_text_line_height())  # a smaller font: center it on its own
             ansi_inline(self, self.legend.splitlines()[0])
             imgui.pop_font()
 
@@ -547,16 +559,21 @@ class ChromeMixin:
                 ("Tab / Up / Down (console)", "Complete / history; empty Enter repeats the last command"),
                 ("Ctrl+L (console)", "Clear console"),
             ]
-            began = begin_table_card(self, "##keys", 2, imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h
-                                     | imgui.TableFlags_.pad_outer_x, fit=True)
-            if began:
+            if self.keys_card is None:
+                self.keys_card = TableCard(self, "##keys", ["Key", ("Action", imgui.TableColumnFlags_.width_stretch)],
+                                           imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h
+                                           | imgui.TableFlags_.pad_outer_x, bg=lambda: mix(self.theme.panel, self.theme.fg, 0.03))  # popup_bg
+            card = self.keys_card
+            if card.begin(rows=len(rows)):
                 for k, d in rows:
                     imgui.table_next_row()
                     imgui.table_next_column()
+                    card.cell(k)
                     imgui.text_colored(v4(self.theme.accent), k)
                     imgui.table_next_column()
+                    card.cell(d)
                     imgui.text_unformatted(d)
-            end_table_card(began)
+            card.end()
             done = imgui.button("Close") or imgui.is_key_pressed(imgui.Key.escape)
         else:
             hints = {

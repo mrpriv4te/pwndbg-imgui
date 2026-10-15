@@ -148,6 +148,14 @@ code. To test: `zig cc -target aarch64-linux-musl -static` (or arm-linux-musleab
 mips-linux-musleabi), `qemu-<arch> -g PORT ./bin`, then
 `guitest.py ... -- --gdb gdb-multiarch -ex "target remote :PORT" ./bin`.
 
+## Tables
+
+Every table goes through `widgets.TableCard` (rounded card, sized to its rows, rounded
+first/last rows by masking the corners after drawing, gap before the scrollbar, copy menu
+and Ctrl+C). Create the card once (pane `__init__`), then each frame: `card.begin(rows=n)`,
+`card.cell(text)` once per cell (the text the copy menu offers), `card.end()` always. Rows
+with their own context menu add `card.copy_menu(row)` to it.
+
 ## Extending (where things plug in)
 
 - **New agent op:** add `op_<name>(self, ...)` to `Agent` in `agent.py`; `handle()`

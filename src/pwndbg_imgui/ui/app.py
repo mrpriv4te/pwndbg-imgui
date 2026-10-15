@@ -22,12 +22,12 @@ from ..theme import THEMES
 from ..transport import Pty, Rpc
 from .appearance import AppearanceMixin
 from .chrome import ChromeMixin
-from .native import NativeWindow
+from .native import NativeWindow, capsule_pointer
 from .panels import PanelsMixin
 from .panes import BacktracePane, BreakpointsPane, HeapPane, ThreadsPane, VmmapPane
 from .sections import SectionsMixin
 from .views import CmdView, DecompView, MemoryView
-from .widgets import TextView, ansi_inline, v4
+from .widgets import TableCard, TextView, ansi_inline, v4
 
 
 from .catalog import AUTOFIT_HEIGHT, SECTION_META
@@ -97,6 +97,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.load_more_t = 0.0
         self.gdb_idle = False  # True while gdb sits at its prompt
         self.native: NativeWindow | None = None  # set when the themed title bar is active
+        self.window_ctl: NativeWindow | None = None  # GLFW access, for detached views (any title bar)
         self.titlebar_drag = None
 
         self.sections: dict[str, dict] = {}
@@ -115,6 +116,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.vmmap_pane = VmmapPane(self)
         self.breakpoints_pane = BreakpointsPane(self)
         self.heap_pane = HeapPane(self)
+        self.cfg_card: TableCard | None = None  # created at first draw (column widths need the font)
+        self.keys_card: TableCard | None = None
         self.backtrace_pane = BacktracePane(self)
         self.threads_pane = ThreadsPane(self)
         self.cmd_views: list[CmdView] = []
@@ -208,6 +211,10 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.toasts.append({"text": text, "kind": kind, "t0": time.monotonic(), "ttl": ttl,
                             "actions": actions, "key": key})
         self.toasts = self.toasts[-6:]
+
+    def copy_text(self, text: str) -> None:
+        imgui.set_clipboard_text(text)
+        self.toast(f"{fa.ICON_FA_COPY}  Copied", "info", 1.2)
 
     def error_toast(self, err: str) -> None:
         self.toast(err, "error", 5.0)
@@ -623,12 +630,32 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.layout_sent = None
         self.toast(f"{fa.ICON_FA_ROTATE_LEFT}  Your layout restored", "info", 2.5)
 
+    def handoff_viewport_drag(self) -> None:
+        """A detached view (its own OS window) being dragged by ImGui: hand the move to the
+        window manager, like the main title bar (off-screen, tiling). Shift+drag keeps
+        ImGui's drag, which is how a detached window is docked back."""
+        ctl = self.window_ctl
+        io = imgui.get_io()
+        if ctl is None or io.key_shift or not imgui.is_mouse_dragging(0, 4.0):
+            return
+        moving = imgui.get_current_context().moving_window
+        if moving is None or not moving.viewport_owned or moving.viewport is None:
+            return
+        vp = moving.viewport
+        if vp.id == imgui.get_main_viewport().id:
+            return
+        handle = capsule_pointer(vp.platform_handle)
+        if handle and ctl.wm_move(handle):
+            io.add_mouse_button_event(0, False)  # the WM gets the release; end ImGui's move
+            imgui.internal.clear_active_id()
+
     def pre_new_frame(self) -> None:
         self.process_inbox()
         if self.proc is not None and self.proc.poll() is not None and not self.exiting:
             hello_imgui.get_runner_params().app_shall_exit = True
         if self.exit_signal:
             hello_imgui.get_runner_params().app_shall_exit = True
+        self.handoff_viewport_drag()
         if time.monotonic() - self.last_persist > self.PERSIST_EVERY and not self.exiting:
             self.persist()
         if self._restore_layout_ini is not None:
@@ -659,6 +686,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
             native = NativeWindow()
         except (OSError, AttributeError):
             pass
+        self.window_ctl = native
         if self.cfg.maximize and native is not None and not native.maximized():
             native.toggle_maximize()  # the restored previous size can override the initial state
         if hello_imgui.get_runner_params().app_window_params.borderless:

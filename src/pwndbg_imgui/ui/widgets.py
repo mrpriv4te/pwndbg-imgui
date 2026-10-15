@@ -37,31 +37,179 @@ def buttons_width(*labels: str) -> float:
     return sum(imgui.calc_text_size(lbl.split("##")[0]).x + st.frame_padding.x * 2 + st.item_spacing.x for lbl in labels)
 
 
-def begin_table_card(app, str_id: str, columns: int, flags: int, height: float = 0.0,
-                     fit: bool = False) -> bool:
-    """A table in a rounded "card" that stands out from the pane (ImGui tables can't round
-    their corners, so a child window does, padded so rows stay inside the curve).
-    height 0 fills the space left; fit=True sizes the card to its rows instead.
-    Always call end_table_card(result), whatever this returns."""
-    th = app.theme
-    imgui.push_style_var(imgui.StyleVar_.child_rounding, 6.0)
-    imgui.push_style_var(imgui.StyleVar_.window_padding, ImVec2(5, 5))
-    imgui.push_style_color(imgui.Col_.child_bg, v4(mix(th.panel, th.fg, 0.05)))
-    imgui.push_style_color(imgui.Col_.border, v4(mix(th.border, th.fg, 0.08)))
-    child_flags = imgui.ChildFlags_.borders | imgui.ChildFlags_.always_use_window_padding
-    if fit:
-        child_flags |= imgui.ChildFlags_.auto_resize_y
-        flags &= ~imgui.TableFlags_.scroll_y  # the card grows with the rows instead
-    imgui.begin_child(f"{str_id}_card", ImVec2(0, 0 if fit else height), child_flags)
-    imgui.pop_style_color(2)
-    imgui.pop_style_var(2)
-    return imgui.begin_table(str_id, columns, flags)
+class TableCard:
+    """A table in a rounded "card" that stands out from the pane.
 
+    - rounded: ImGui tables can't round their corners, so after the table is drawn its four
+      corners are masked with the pane's color, which rounds the header's top corners and the
+      last row's bottom corners (and any highlight there);
+    - sized to its rows when they fit (the last row sits at the bottom of the card), else it
+      fills the space left and scrolls, with a gap between the rows and the scrollbar;
+    - copyable: cells record their text (cell()); right-click a row for a Copy menu (one
+      cell, the row, all rows as TSV), Ctrl+C copies the hovered row. Tables whose rows have
+      their own context menu add the same items with copy_menu(row).
 
-def end_table_card(began: bool) -> None:
-    if began:
-        imgui.end_table()
-    imgui.end_child()
+        self.card = TableCard(app, "##id", ["Name", ("Value", stretch)], flags)  # once
+        card = self.card
+        if card.begin(rows=len(items)):  # every frame
+            for item in items:
+                imgui.table_next_row(); imgui.table_next_column()
+                card.cell(name); imgui.text_unformatted(name) ...
+        card.end()
+    """
+
+    RADIUS = 6.0
+
+    def __init__(self, app, str_id: str, columns: list, flags: int, framed: bool = False,
+                 freeze: bool = True, bg=None) -> None:
+        self.app = app
+        self.id = str_id
+        # (name, column flags, initial width or a callable giving it); a bare name is (name, 0, 0)
+        self.columns: list[tuple[str, int, object]] = []
+        for c in columns:
+            c = (c,) if isinstance(c, str) else tuple(c)
+            self.columns.append((str(c[0]), int(c[1]) if len(c) > 1 else 0, c[2] if len(c) > 2 else 0.0))
+        self.flags = flags
+        self.framed = framed  # rows hold widgets (checkbox, input): frame-high rows
+        self.freeze = freeze
+        self.bg = bg  # color behind the card, for the rounded corners: None = the pane's; or a callable
+        self.bg_now = None
+        self.began = False
+        self.cells: dict[int, list[str]] = {}  # this frame: table row index -> cell texts
+        self.prev_cells: dict[int, list[str]] = {}  # last frame's, complete (for row menus)
+        self.menu_row = 0
+        self.row_tops: list[tuple[int, float]] = []
+        self.dl = None
+        self.rect = None
+
+    # -- drawing -----------------------------------------------------------------
+    def begin(self, rows: int | None = None, max_height: float | None = None) -> bool:
+        """rows: how many rows will follow, to size the card to them (None: fill the space
+        left, or max_height)."""
+        app = self.app
+        th = app.theme
+        style = imgui.get_style()
+        self.bg_now = th.panel if self.bg is None else (self.bg() if callable(self.bg) else self.bg)
+        room = imgui.get_content_region_avail().y if max_height is None else max_height
+        height = 0.0 if max_height is None else max_height
+        if rows is not None:  # fit the rows when they fit, else fill and scroll
+            line = imgui.get_frame_height() if self.framed else imgui.get_text_line_height()
+            header_h = imgui.get_text_line_height() + 2 * style.cell_padding.y
+            need = header_h + rows * (line + 2 * style.cell_padding.y) + 2
+            if need < room:
+                height = need
+        imgui.push_style_var(imgui.StyleVar_.child_rounding, self.RADIUS)
+        imgui.push_style_var(imgui.StyleVar_.window_padding, ImVec2(0, 0))
+        imgui.push_style_color(imgui.Col_.child_bg, v4(mix(th.panel, th.fg, 0.05)))
+        imgui.begin_child(f"{self.id}_card", ImVec2(0, height), imgui.ChildFlags_.none,
+                          imgui.WindowFlags_.no_scrollbar | imgui.WindowFlags_.no_scroll_with_mouse)
+        imgui.pop_style_color()
+        imgui.pop_style_var(2)
+        pos, size = imgui.get_window_pos(), imgui.get_window_size()
+        self.rect = (pos, ImVec2(pos.x + size.x, pos.y + size.y))
+        self.dl = imgui.get_window_draw_list()
+        # a gap between the rows and the scrollbar's grab (the track itself is transparent)
+        imgui.push_style_var(imgui.StyleVar_.scrollbar_padding, 3.0)
+        self.began = imgui.begin_table(self.id, len(self.columns), self.flags)
+        imgui.pop_style_var()
+        if not self.began:
+            return False
+        if self.freeze and self.flags & imgui.TableFlags_.scroll_y:
+            imgui.table_setup_scroll_freeze(0, 1)
+        for name, cflags, width in self.columns:
+            imgui.table_setup_column(name, cflags, float(width() if callable(width) else width))  # type: ignore[arg-type]
+        imgui.table_headers_row()
+        self.prev_cells, self.cells = self.cells, {}
+        self.row_tops = []
+        return True
+
+    def cell(self, text: str) -> None:
+        """Record the current cell's text (call once per cell, in order)."""
+        row, col = imgui.table_get_row_index(), imgui.table_get_column_index()
+        cells = self.cells.setdefault(row, [])
+        if col == 0:
+            self.row_tops.append((row, imgui.get_cursor_screen_pos().y))
+        cells.extend([""] * (col + 1 - len(cells)))
+        cells[col] = text
+
+    def end(self) -> None:
+        if self.began:
+            self.dl = imgui.get_window_draw_list()  # the table's own (scrolling) window
+            self._copy_handling()
+            imgui.end_table()
+        self._round_corners()
+        imgui.end_child()
+
+    def _round_corners(self) -> None:
+        if self.rect is None or self.dl is None:
+            return
+        import math
+
+        (p0, p1), r, dl = self.rect, self.RADIUS, self.dl
+        th = self.app.theme
+        bg = u32(self.bg_now)
+        dl.push_clip_rect(p0, p1, False)
+        for corner, center, a0, a1 in (
+            (ImVec2(p0.x, p0.y), ImVec2(p0.x + r, p0.y + r), 1.5 * math.pi, math.pi),
+            (ImVec2(p1.x, p0.y), ImVec2(p1.x - r, p0.y + r), 1.5 * math.pi, 2.0 * math.pi),
+            (ImVec2(p1.x, p1.y), ImVec2(p1.x - r, p1.y - r), 0.0, 0.5 * math.pi),
+            (ImVec2(p0.x, p1.y), ImVec2(p0.x + r, p1.y - r), 0.5 * math.pi, math.pi),
+        ):
+            dl.path_clear()
+            dl.path_line_to(corner)
+            dl.path_arc_to(center, r, a0, a1, 8)
+            dl.path_fill_concave(bg)
+        dl.add_rect(p0, p1, u32(mix(th.border, th.fg, 0.08)), r)
+        dl.pop_clip_rect()
+
+    # -- copying -----------------------------------------------------------------
+    def _hovered_row(self) -> int | None:
+        y = imgui.get_mouse_pos().y
+        row = None
+        for idx, top in self.row_tops:
+            if top <= y:
+                row = idx
+        return row
+
+    def _copy_handling(self) -> None:
+        if not imgui.is_window_hovered(imgui.HoveredFlags_.child_windows):
+            return
+        row = self._hovered_row()
+        if row is None:
+            return
+        io = imgui.get_io()
+        if io.key_ctrl and imgui.is_key_pressed(imgui.Key.c, False) and not imgui.is_any_item_active():
+            self.app.copy_text(self.row_text(row))
+        if imgui.is_mouse_released(1) and not imgui.is_popup_open("", imgui.PopupFlags_.any_popup_id):
+            self.menu_row = row
+            imgui.open_popup(f"{self.id}_copy")
+        if imgui.begin_popup(f"{self.id}_copy"):
+            self.copy_menu(self.menu_row, submenu=False)
+            imgui.end_popup()
+
+    def row_cells(self, row: int) -> list[str]:
+        return self.cells.get(row) or self.prev_cells.get(row) or []
+
+    def row_text(self, row: int) -> str:
+        return "\t".join(self.row_cells(row))
+
+    def copy_menu(self, row: int, submenu: bool = True) -> None:
+        """Copy items for a row: each cell, the row, all rows (TSV with the header)."""
+        cells = self.row_cells(row)
+        if submenu and not imgui.begin_menu(f"{fa.ICON_FA_COPY}  Copy"):
+            return
+        for (name, _flags, _width), text in zip(self.columns, cells, strict=False):
+            if text and imgui.menu_item_simple(f"{name or 'cell'}:  {text[:60]}"):
+                self.app.copy_text(text)
+        imgui.separator()
+        if imgui.menu_item_simple("Whole row", "Ctrl+C"):
+            self.app.copy_text(self.row_text(row))
+        if imgui.menu_item_simple("All rows (TSV)"):
+            header = "\t".join(name for name, _flags, _width in self.columns)
+            body = "\n".join(self.row_text(r) for r in sorted(self.prev_cells or self.cells))
+            self.app.copy_text(header + "\n" + body)
+        if submenu:
+            imgui.end_menu()
 
 
 def combo_width(longest: str) -> float:

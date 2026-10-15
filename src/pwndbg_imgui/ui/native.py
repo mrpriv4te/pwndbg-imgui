@@ -8,6 +8,21 @@ import os
 from imgui_bundle import hello_imgui
 
 
+def capsule_pointer(capsule) -> int | None:
+    """The pointer inside a PyCapsule (how imgui-bundle exposes Viewport.platform_handle)."""
+    if capsule is None:
+        return None
+    api = ctypes.pythonapi
+    api.PyCapsule_GetName.restype = ctypes.c_char_p
+    api.PyCapsule_GetName.argtypes = [ctypes.py_object]
+    api.PyCapsule_GetPointer.restype = ctypes.c_void_p
+    api.PyCapsule_GetPointer.argtypes = [ctypes.py_object, ctypes.c_char_p]
+    try:
+        return api.PyCapsule_GetPointer(capsule, api.PyCapsule_GetName(capsule))
+    except (ValueError, TypeError):
+        return None
+
+
 class XClientMessageEvent(ctypes.Structure):
     """Xlib's XClientMessageEvent, padded to sizeof(XEvent) (24 longs)."""
 
@@ -84,27 +99,30 @@ class NativeWindow:
             x11.XSendEvent.argtypes = [ct.c_void_p, ct.c_ulong, ct.c_int, ct.c_long, ct.c_void_p]
             x11.XFlush.argtypes = [ct.c_void_p]
             dpy = self.lib.glfwGetX11Display()
-            xwin = self.lib.glfwGetX11Window(self.win)
-            if not dpy or not xwin:
+            if not dpy:
                 return False
-            self._x11 = (x11, dpy, xwin, x11.XDefaultRootWindow(dpy),
-                         x11.XInternAtom(dpy, b"_NET_WM_MOVERESIZE", 0))
+            self._x11 = (x11, dpy, x11.XDefaultRootWindow(dpy), x11.XInternAtom(dpy, b"_NET_WM_MOVERESIZE", 0))
         except (OSError, AttributeError):
             return False
         return True
 
-    def wm_move(self) -> bool:
+    def wm_move(self, win=None) -> bool:
         """Hand a title-bar drag to the window manager (X11 `_NET_WM_MOVERESIZE`), as a
         native title bar does: the WM then moves the window itself, so it can leave the
         screen and edge tiling / snapping work (a window moved by the app is constrained
-        and never tiled). Returns False when unavailable; the caller moves it instead."""
+        and never tiled). win: a GLFWwindow* (a detached ImGui viewport), default the main
+        window. Returns False when unavailable; the caller moves it instead."""
         if not self._x11_setup() or self._x11 is None:
             return False
         ct = self.ct
         try:
-            x11, dpy, xwin, root, atom = self._x11
+            x11, dpy, root, atom = self._x11
+            win = ct.c_void_p(win) if isinstance(win, int) else (win or self.win)
+            xwin = self.lib.glfwGetX11Window(win)
+            if not xwin:
+                return False
 
-            x, y = self.cursor()
+            x, y = self.cursor(win)
             ev = XClientMessageEvent(type=33, send_event=1, display=dpy, window=xwin, message_type=atom, format=32)
             ev.l[:] = [int(x), int(y), 8, 1, 1]  # root x/y, _NET_WM_MOVERESIZE_MOVE, button 1, from an app
             x11.XUngrabPointer(dpy, 0)  # the WM can only grab the pointer if we let it go
@@ -130,17 +148,17 @@ class NativeWindow:
     def focused(self) -> bool:
         return bool(self.lib.glfwGetWindowAttrib(self.win, self.FOCUSED))
 
-    def pos(self) -> tuple[int, int]:
+    def pos(self, win=None) -> tuple[int, int]:
         x, y = self.ct.c_int(), self.ct.c_int()
-        self.lib.glfwGetWindowPos(self.win, self.ct.byref(x), self.ct.byref(y))
+        self.lib.glfwGetWindowPos(win or self.win, self.ct.byref(x), self.ct.byref(y))
         return x.value, y.value
 
     def set_pos(self, x: int, y: int) -> None:
         self.lib.glfwSetWindowPos(self.win, int(x), int(y))
 
-    def cursor(self) -> tuple[float, float]:
-        """Cursor position in screen coordinates."""
+    def cursor(self, win=None) -> tuple[float, float]:
+        """Cursor position in screen coordinates (win: a GLFWwindow*, default the main one)."""
         cx, cy = self.ct.c_double(), self.ct.c_double()
-        self.lib.glfwGetCursorPos(self.win, self.ct.byref(cx), self.ct.byref(cy))
-        wx, wy = self.pos()
+        self.lib.glfwGetCursorPos(win or self.win, self.ct.byref(cx), self.ct.byref(cy))
+        wx, wy = self.pos(win)
         return wx + cx.value, wy + cy.value

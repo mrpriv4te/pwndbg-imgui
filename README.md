@@ -193,8 +193,10 @@ a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
   (`$sp`, `$rdi`…), value inspector.
 - **🧵 Backtrace & Threads** — tables instead of text: frames with address,
   function+offset and `file:line` (click to select a frame, right-click to finish up to it,
-  disassemble, copy…), threads with name, TID, state and location (click to switch). A
-  button switches back to pwndbg's own output.
+  disassemble, copy…), threads with name, TID, state and location (click to switch).
+- **📋 Tables** — every table (VMMap, Breakpoints, Heap, Backtrace, Threads, Config) is
+  copyable: right-click a row for **Copy** (one cell, the row, or all rows as TSV), or
+  <kbd>Ctrl</kbd>+<kbd>C</kbd> over a row.
 - **🧱 Heap** (glibc) — every chunk of the current arena with its size, flags and state
   (in use, tcache, fastbin, unsorted, small/large bin, top), and the non-empty bins with their
   chains; addresses open in Memory. Built on pwndbg's heap model, refreshed at each stop
@@ -209,7 +211,9 @@ a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
   (Run/Start/Continue/Pause/Step…), status bar (pid, arch, checksec, legend), notifications
   (breakpoint, signal, exit).
 - **🎨 Appearance** — 13 themes (dark and light, contrast auto-corrected), a themed title bar
-  (drag to move, double-click to maximize), code zoom (<kbd>Ctrl</kbd>+wheel), system fonts,
+  (drag to move, double-click to maximize: moves go through the window manager, so the
+  window can leave the screen and your desktop's tiling / edge snapping works). Windows
+  detached from the main one move the same way; **Shift**+drag one to dock it back. Code zoom (<kbd>Ctrl</kbd>+wheel), system fonts,
   persistent layout and settings (`~/.config/pwndbg-imgui/`).
 
 ---

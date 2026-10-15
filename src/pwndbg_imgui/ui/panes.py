@@ -11,11 +11,12 @@ from typing import TYPE_CHECKING
 
 from imgui_bundle import imgui
 from imgui_bundle import icons_fontawesome_6 as fa
-from .widgets import begin_table_card, buttons_width, end_table_card, v4
+from .widgets import TableCard, buttons_width, v4
 
 if TYPE_CHECKING:
     from .app import App
 
+STRETCH = imgui.TableColumnFlags_.width_stretch
 TABLE_FLAGS = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.pad_outer_x
                | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable | imgui.TableFlags_.sizing_fixed_fit)
 
@@ -28,6 +29,8 @@ class VmmapPane:
     def __init__(self, app: App) -> None:
         self.app = app
         self.filter = ""
+        self.card = TableCard(app, "##vmmap", ["Start", "End", "Size", "Perm", "Offset", ("File", STRETCH)],
+                              TABLE_FLAGS)
 
     def matches(self, page) -> bool:
         start, end, perm, _off, objfile, kind = page
@@ -54,19 +57,15 @@ class VmmapPane:
             imgui.text_disabled("The memory map appears once the program is stopped.")
             return
         imgui.push_font(app.mono, app.code_size)
-        began = begin_table_card(app, "##vmmap", 6, TABLE_FLAGS)
-        if began:
-            imgui.table_setup_scroll_freeze(0, 1)
-            for col in ("Start", "End", "Size", "Perm", "Offset"):
-                imgui.table_setup_column(col)
-            imgui.table_setup_column("File", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_headers_row()
-            for i, p in enumerate(app.vmmap):
-                if not self.matches(p):
-                    continue
+        pages = [(i, p) for i, p in enumerate(app.vmmap) if self.matches(p)]
+        card = self.card
+        if card.begin(rows=len(pages)):
+            for i, p in pages:
                 start, end, perm, off, objfile, kind = p
                 imgui.table_next_row()
                 imgui.table_next_column()
+                row = imgui.table_get_row_index()
+                card.cell(f"{start:#x}")
                 imgui.push_style_color(imgui.Col_.text, v4(th.kind_color(kind)))
                 clicked, _ = imgui.selectable(
                     f"{start:#x}##vm{i}", False,
@@ -75,37 +74,30 @@ class VmmapPane:
                     app.open_memory(start)
                 if imgui.begin_popup_context_item(f"##vmctx{i}"):
                     imgui.pop_font()
-                    self._menu(start, end, objfile)
+                    self._menu(start, objfile)
+                    card.copy_menu(row)
                     imgui.push_font(app.mono, app.code_size)
                     imgui.end_popup()
+                for text in (f"{end:#x}", f"{end - start:#x}", perm, f"{off:#x}"):
+                    imgui.table_next_column()
+                    card.cell(text)
+                    imgui.text_unformatted(text)
                 imgui.table_next_column()
-                imgui.text_unformatted(f"{end:#x}")
-                imgui.table_next_column()
-                imgui.text_unformatted(f"{end - start:#x}")
-                imgui.table_next_column()
-                imgui.text_unformatted(perm)
-                imgui.table_next_column()
-                imgui.text_unformatted(f"{off:#x}")
-                imgui.table_next_column()
+                card.cell(objfile)
                 imgui.text_unformatted(os.path.basename(objfile) if objfile.startswith("/") else objfile)
                 if objfile.startswith("/"):
                     imgui.set_item_tooltip(objfile)
                 imgui.pop_style_color()
-        end_table_card(began)
+        card.end()
         imgui.pop_font()
 
-    def _menu(self, start: int, end: int, objfile: str) -> None:
+    def _menu(self, start: int, objfile: str) -> None:
         app = self.app
         if imgui.menu_item_simple(f"{fa.ICON_FA_MEMORY}  View memory"):
             app.open_memory(start)
         if imgui.menu_item_simple(f"{fa.ICON_FA_LAYER_GROUP}  Telescope start"):
             app.open_cmd_view(f"telescope {start:#x} 32")
-        if imgui.menu_item_simple(f"{fa.ICON_FA_COPY}  Copy start"):
-            imgui.set_clipboard_text(f"{start:#x}")
-        if imgui.menu_item_simple(f"{fa.ICON_FA_COPY}  Copy end"):
-            imgui.set_clipboard_text(f"{end:#x}")
-        if objfile and imgui.menu_item_simple(f"{fa.ICON_FA_COPY}  Copy path"):
-            imgui.set_clipboard_text(objfile)
+        imgui.separator()
 
 
 class BreakpointsPane:
@@ -119,22 +111,18 @@ class BreakpointsPane:
         self.app = app
         self.input = ""
         self.cond_edit: dict[int, str] = {}  # breakpoint number -> condition being typed
+        self.card = TableCard(app, "##bps", ["", "#", "Type", "Where", "Address", "Hits", ("Condition", STRETCH)],
+                              TABLE_FLAGS, framed=True)
 
     def gui(self) -> None:
         self._add_bar()
         if not self.app.bps:
             imgui.text_disabled("No breakpoints. Click the gutter of Disassembly/Source, or add one above.")
             return
-        began = begin_table_card(self.app, "##bps", 7, TABLE_FLAGS)
-        if began:
-            imgui.table_setup_scroll_freeze(0, 1)
-            for col in ("", "#", "Type", "Where", "Address", "Hits"):
-                imgui.table_setup_column(col)
-            imgui.table_setup_column("Condition", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_headers_row()
+        if self.card.begin(rows=len(self.app.bps)):
             for b in self.app.bps:
                 self._row(b)
-        end_table_card(began)
+        self.card.end()
 
     def _add_bar(self) -> None:
         buttons_w = buttons_width(*(k[1] for k in self.KINDS))
@@ -156,8 +144,11 @@ class BreakpointsPane:
         app = self.app
         th = app.theme
         num = b["num"]
+        card = self.card
+        addrs = [loc["addr"] for loc in b.get("locs", []) if loc.get("addr") is not None]
         imgui.table_next_row()
         imgui.table_next_column()
+        card.cell("enabled" if b["enabled"] else "disabled")
         changed, en = imgui.checkbox(f"##en{num}", b["enabled"])
         if changed:
             self._update(num, enabled=en)
@@ -165,16 +156,21 @@ class BreakpointsPane:
         if imgui.small_button(f"{fa.ICON_FA_TRASH}##del{num}") and app.rpc:
             app.rpc.request("bp_delete", None, app.error_toast, num=num)
         imgui.table_next_column()
+        card.cell(str(num))
         imgui.text_colored(v4(th.red if b["enabled"] else th.dim), str(num))
         imgui.table_next_column()
-        imgui.text_unformatted(b.get("type", "?") + (" (temp)" if b.get("temp") else ""))
+        kind = b.get("type", "?") + (" (temp)" if b.get("temp") else "")
+        card.cell(kind)
+        imgui.text_unformatted(kind)
         imgui.table_next_column()
-        imgui.text_unformatted(b.get("location") or b.get("expr") or "")
+        where = b.get("location") or b.get("expr") or ""
+        card.cell(where)
+        imgui.text_unformatted(where)
         if b.get("pending"):
             imgui.same_line()
             imgui.text_disabled("(pending)")
         imgui.table_next_column()
-        addrs = [loc["addr"] for loc in b.get("locs", []) if loc.get("addr") is not None]
+        card.cell(" ".join(f"{a:#x}" for a in addrs))
         if addrs:
             imgui.push_font(app.mono, app.code_size)
             if imgui.text_link(f"{addrs[0]:#x}##bpa{num}"):
@@ -184,9 +180,11 @@ class BreakpointsPane:
                 imgui.same_line()
                 imgui.text_disabled(f"+{len(addrs) - 1}")
         imgui.table_next_column()
+        card.cell(str(b.get("hits", 0)))
         imgui.text_unformatted(str(b.get("hits", 0)))
         imgui.table_next_column()
         cond = b.get("cond") or ""
+        card.cell(cond)
         imgui.set_next_item_width(-1)
         entered, self.cond_edit[num] = imgui.input_text_with_hint(
             f"##cond{num}", "condition (Enter)", self.cond_edit.get(num, cond), imgui.InputTextFlags_.enter_returns_true)
@@ -215,6 +213,8 @@ class HeapPane:
         self.fetched_gen = -1  # App.dirty_gen of the data shown
         self.pending = False
         self.selected: int | None = None
+        self.chunks_card = TableCard(app, "##heapchunks", ["Chunk", "Size", "Flags", ("State", STRETCH)], TABLE_FLAGS)
+        self.bins_card = TableCard(app, "##heapbins", ["Bin", "Count", ("Chain (fd)", STRETCH)], TABLE_FLAGS)
 
     def refresh(self) -> None:
         app = self.app
@@ -265,28 +265,29 @@ class HeapPane:
         free = sum(1 for c in chunks if c["bin"] not in (None, "top"))
         imgui.text_disabled(f"{'main_arena' if d['main'] else 'arena'} {d['arena']:#x} · {len(chunks)} chunks"
                             f" · {free} free" + (" · truncated" if d["truncated"] else ""))
-        avail = imgui.get_content_region_avail()
-        bins_h = min(avail.y * 0.4, imgui.get_text_line_height_with_spacing() * (len(d["bins"]) + 1.5) + 16)
         imgui.push_font(app.mono, app.code_size)
-        self._chunks(chunks, max(60.0, avail.y - bins_h - imgui.get_style().item_spacing.y))
+        avail = imgui.get_content_region_avail().y
+        style = imgui.get_style()
+        row = imgui.get_text_line_height() + 2 * style.cell_padding.y
+        bins_h = min(avail * 0.4, row * (len(d["bins"]) + 1) + 2) if d["bins"] else row
+        self._chunks(chunks, max(60.0, avail - bins_h - style.item_spacing.y))
         self._bins(d["bins"], {c["addr"] for c in chunks})
         imgui.pop_font()
 
-    def _chunks(self, chunks: list, height: float) -> None:
+    def _chunks(self, chunks: list, max_height: float) -> None:
         app = self.app
-        began = begin_table_card(app, "##heapchunks", 4, TABLE_FLAGS, height)
-        if not began:
-            end_table_card(began)
+        card = self.chunks_card
+        if not card.begin(rows=len(chunks), max_height=max_height):
+            card.end()
             return
-        imgui.table_setup_scroll_freeze(0, 1)
-        for col in ("Chunk", "Size", "Flags"):
-            imgui.table_setup_column(col)
-        imgui.table_setup_column("State", imgui.TableColumnFlags_.width_stretch)
-        imgui.table_headers_row()
         for c in chunks:
             addr, state = c["addr"], c["bin"]
+            flags = ("P" if c["prev_inuse"] else "-") + ("M" if c["mmapped"] else "-")
+            state_name = self.STATE_NAMES.get(state, "") if state else "in use"
             imgui.table_next_row()
             imgui.table_next_column()
+            row = imgui.table_get_row_index()
+            card.cell(f"{addr:#x}")
             imgui.push_style_color(imgui.Col_.text, v4(self.state_color(state)))
             clicked, _ = imgui.selectable(f"{addr:#x}##hc{addr}", self.selected == addr,
                                           imgui.SelectableFlags_.span_all_columns
@@ -295,40 +296,46 @@ class HeapPane:
                 self.selected = addr
                 if imgui.is_mouse_double_clicked(0):
                     app.open_memory(addr)
-            imgui.set_item_tooltip("Double-click: open in Memory")
-            imgui.table_next_column()
-            imgui.text_unformatted(f"{c['size']:#x}")
-            imgui.table_next_column()
-            imgui.text_unformatted(("P" if c["prev_inuse"] else "-") + ("M" if c["mmapped"] else "-"))
-            imgui.table_next_column()
-            imgui.text_unformatted(self.STATE_NAMES.get(state, "") if state else "in use")
+            imgui.set_item_tooltip("Double-click: open in Memory · right-click: more")
+            if imgui.begin_popup_context_item(f"##hcctx{addr}"):
+                imgui.pop_font()
+                if imgui.menu_item_simple(f"{fa.ICON_FA_MEMORY}  Open in Memory"):
+                    app.open_memory(addr)
+                imgui.separator()
+                card.copy_menu(row)
+                imgui.push_font(app.mono, app.code_size)
+                imgui.end_popup()
+            for text in (f"{c['size']:#x}", flags, state_name):
+                imgui.table_next_column()
+                card.cell(text)
+                imgui.text_unformatted(text)
             imgui.pop_style_color()
-        end_table_card(began)
+        card.end()
 
     def _bins(self, bins: list, chunk_addrs: set) -> None:
         app = self.app
         if not bins:
             imgui.text_disabled("All bins are empty.")
             return
-        began = begin_table_card(app, "##heapbins", 3, TABLE_FLAGS, fit=True)
-        if not began:
-            end_table_card(began)
+        card = self.bins_card
+        if not card.begin(rows=len(bins)):
+            card.end()
             return
-        for col in ("Bin", "Count"):
-            imgui.table_setup_column(col)
-        imgui.table_setup_column("Chain (fd)", imgui.TableColumnFlags_.width_stretch)
-        imgui.table_headers_row()
         for i, b in enumerate(bins):
             imgui.table_next_row()
             imgui.table_next_column()
             key = b["key"] if isinstance(b["key"], str) else f"{b['key']:#x}"
+            card.cell(f"{self.STATE_NAMES[b['type']]} {key}" + (" corrupted" if b["corrupted"] else ""))
             imgui.text_colored(v4(self.state_color(b["type"])), f"{self.STATE_NAMES[b['type']]} {key}")
             if b["corrupted"]:
                 imgui.same_line()
                 imgui.text_colored(v4(app.theme.red), "corrupted")
             imgui.table_next_column()
-            imgui.text_unformatted("" if b["count"] is None else str(b["count"]))
+            count = "" if b["count"] is None else str(b["count"])
+            card.cell(count)
+            imgui.text_unformatted(count)
             imgui.table_next_column()
+            card.cell(" -> ".join(f"{a:#x}" for a in b["chain"]))
             for j, a in enumerate(b["chain"]):
                 if j:
                     imgui.same_line(0, 4)
@@ -342,7 +349,7 @@ class HeapPane:
                         app.open_memory(a)
                 else:
                     imgui.text_disabled(f"{a:#x}")  # e.g. the bin's head inside the arena
-        end_table_card(began)
+        card.end()
 
 
 class StopRefreshed:
@@ -356,6 +363,10 @@ class StopRefreshed:
         self.error = ""
         self.fetched_gen = -1  # App.dirty_gen of the data shown
         self.pending = False
+
+    def unavailable(self) -> bool:
+        """The data can't be shown (pwndbg missing, old gdb...): show pwndbg's text instead."""
+        return bool(self.error) and self.app.is_stopped()
 
     def invalidate(self) -> None:
         """Refetch at the next draw (e.g. after selecting another frame or thread)."""
@@ -377,6 +388,12 @@ class StopRefreshed:
             self.error, self.data = err, None
 
         app.rpc.request(self.OP, done, fail)
+
+    @staticmethod
+    def location_text(entry: dict) -> str:
+        name = entry.get("sym") or entry.get("func") or "??"
+        where = f"{entry['file']}:{entry['line']}" if entry.get("file") else entry.get("module") or ""
+        return f"{name} {where}".strip()
 
     def location_cell(self, entry: dict) -> None:
         """function / symbol, then source file:line or module, dimmed."""
@@ -405,6 +422,10 @@ class BacktracePane(StopRefreshed):
 
     OP = "frames"
 
+    def __init__(self, app: App) -> None:
+        super().__init__(app)
+        self.card = TableCard(app, "##frames", ["#", "Address", ("Function / location", STRETCH)], TABLE_FLAGS)
+
     def gui(self) -> None:
         app = self.app
         self.refresh_if_stale()
@@ -416,17 +437,14 @@ class BacktracePane(StopRefreshed):
             return
         frames = self.data["frames"]
         imgui.push_font(app.mono, app.code_size)
-        began = begin_table_card(app, "##frames", 3, TABLE_FLAGS)
-        if began:
-            imgui.table_setup_scroll_freeze(0, 1)
-            imgui.table_setup_column("#")
-            imgui.table_setup_column("Address")
-            imgui.table_setup_column("Function / location", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_headers_row()
+        card = self.card
+        if card.begin(rows=len(frames) + bool(self.data.get("truncated"))):
             for f in frames:
                 level = f["level"]
                 imgui.table_next_row()
                 imgui.table_next_column()
+                row = imgui.table_get_row_index()
+                card.cell(str(level))
                 clicked, _ = imgui.selectable(f"{'►' if f['selected'] else ' '} {level}##fr{level}", f["selected"],
                                               imgui.SelectableFlags_.span_all_columns
                                               | imgui.SelectableFlags_.allow_overlap)
@@ -435,17 +453,20 @@ class BacktracePane(StopRefreshed):
                 if imgui.begin_popup_context_item(f"##frctx{level}"):
                     imgui.pop_font()
                     self._menu(f)
+                    card.copy_menu(row)
                     imgui.push_font(app.mono, app.code_size)
                     imgui.end_popup()
                 imgui.table_next_column()
+                card.cell(f"{f['pc']:#x}")
                 self.address_cell(f["pc"])
                 imgui.table_next_column()
+                card.cell(self.location_text(f))
                 self.location_cell(f)
             if self.data.get("truncated"):
                 imgui.table_next_row()
                 imgui.table_next_column()
                 imgui.text_disabled("…")
-        end_table_card(began)
+        card.end()
         imgui.pop_font()
 
     def select(self, level: int) -> None:
@@ -466,11 +487,7 @@ class BacktracePane(StopRefreshed):
             app.open_cmd_view(f"nearpc {pc:#x} 40")
         if imgui.menu_item_simple(f"{fa.ICON_FA_MEMORY}  Memory at {pc:#x}"):
             app.open_memory(pc)
-        if imgui.menu_item_simple(f"{fa.ICON_FA_COPY}  Copy address"):
-            imgui.set_clipboard_text(f"{pc:#x}")
-        name = f.get("sym") or f.get("func")
-        if name and imgui.menu_item_simple(f"{fa.ICON_FA_COPY}  Copy function"):
-            imgui.set_clipboard_text(name)
+        imgui.separator()
 
 
 class ThreadsPane(StopRefreshed):
@@ -478,6 +495,10 @@ class ThreadsPane(StopRefreshed):
 
     OP = "threads"
     STATE_ICONS = {"stopped": fa.ICON_FA_PAUSE, "running": fa.ICON_FA_PLAY, "exited": fa.ICON_FA_XMARK}
+
+    def __init__(self, app: App) -> None:
+        super().__init__(app)
+        self.card = TableCard(app, "##threads", ["#", "Name", "TID", "State", ("Location", STRETCH)], TABLE_FLAGS)
 
     def gui(self) -> None:
         app = self.app
@@ -489,18 +510,16 @@ class ThreadsPane(StopRefreshed):
             imgui.text_disabled(self.error or "Loading…")
             return
         th = app.theme
+        threads = self.data["threads"]
         imgui.push_font(app.mono, app.code_size)
-        began = begin_table_card(app, "##threads", 5, TABLE_FLAGS)
-        if began:
-            imgui.table_setup_scroll_freeze(0, 1)
-            for col in ("#", "Name", "TID", "State"):
-                imgui.table_setup_column(col)
-            imgui.table_setup_column("Location", imgui.TableColumnFlags_.width_stretch)
-            imgui.table_headers_row()
-            for t in self.data["threads"]:
+        card = self.card
+        if card.begin(rows=len(threads)):
+            for t in threads:
                 num = t["num"]
                 imgui.table_next_row()
                 imgui.table_next_column()
+                row = imgui.table_get_row_index()
+                card.cell(str(num))
                 clicked, _ = imgui.selectable(f"{'►' if t['selected'] else ' '} {num}##th{num}", t["selected"],
                                               imgui.SelectableFlags_.span_all_columns
                                               | imgui.SelectableFlags_.allow_overlap)
@@ -511,23 +530,27 @@ class ThreadsPane(StopRefreshed):
                     if imgui.menu_item_simple(f"{fa.ICON_FA_ARROW_RIGHT}  Switch to thread {num}", "click", False,
                                               not t["selected"] and t["state"] == "stopped"):
                         self.select(num)
-                    if imgui.menu_item_simple(f"{fa.ICON_FA_COPY}  Copy TID"):
-                        imgui.set_clipboard_text(str(t["tid"]))
+                    imgui.separator()
+                    card.copy_menu(row)
                     imgui.push_font(app.mono, app.code_size)
                     imgui.end_popup()
                 imgui.table_next_column()
+                card.cell(t["name"] or "")
                 imgui.text_unformatted(t["name"] or "")
                 imgui.table_next_column()
+                card.cell(str(t["tid"]))
                 imgui.text_disabled(str(t["tid"]))
                 imgui.table_next_column()
+                card.cell(t["state"])
                 color = {"stopped": th.yellow, "running": th.green}.get(t["state"], th.dim)
                 imgui.text_colored(v4(color), f"{self.STATE_ICONS.get(t['state'], '')} {t['state']}")
                 imgui.table_next_column()
+                card.cell(f"{t['pc']:#x} {self.location_text(t)}" if "pc" in t else "")
                 if "pc" in t:
                     self.address_cell(t["pc"])
                     imgui.same_line()
                     self.location_cell(t)
-        end_table_card(began)
+        card.end()
         imgui.pop_font()
 
     def select(self, num: int) -> None:

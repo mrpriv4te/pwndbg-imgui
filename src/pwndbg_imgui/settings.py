@@ -67,7 +67,6 @@ class Settings:
         "views": [],
         "user_layout": None,  # "Save current layout as default": {ini, visible}
         "visible": {},
-        "text_sections": [],  # context sections shown as pwndbg's text instead of a table
     }
     HISTORY_LIMITS = {"console_history": 500, "io_history": 200}  # append-only, capped on disk
 

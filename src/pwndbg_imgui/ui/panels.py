@@ -13,7 +13,7 @@ from ..term import ECHO, strip_ansi
 from ..theme import THEMES
 from .panes import BreakpointsPane, HeapPane, VmmapPane
 from .views import DecompView
-from .widgets import begin_table_card, buttons_width, combo_width, end_table_card, help_marker, v4
+from .widgets import TableCard, buttons_width, combo_width, help_marker, v4
 
 
 class PanelsMixin:
@@ -26,13 +26,8 @@ class PanelsMixin:
                 imgui.text_colored(v4(self.theme.yellow), "pwndbg is not loaded in gdb (see --pwndbg).")
             table = {"backtrace": self.backtrace_pane, "threads": self.threads_pane}.get(name)
             if table is not None:
-                as_text = name in self.settings["text_sections"]
-                if imgui.small_button(f"{fa.ICON_FA_TABLE_LIST} table##tt{name}" if as_text
-                                      else f"{fa.ICON_FA_ALIGN_LEFT} pwndbg text##tt{name}"):
-                    texts = self.settings["text_sections"]
-                    self.settings["text_sections"] = ([n for n in texts if n != name] if as_text else texts + [name])
-                imgui.set_item_tooltip("Switch between the table and pwndbg's own output")
-                if not as_text:
+                table.refresh_if_stale()  # once per stop, also while showing the fallback
+                if not table.unavailable():  # else: pwndbg's own text, below
                     table.gui()
                     return
             if name == "expressions":
@@ -408,17 +403,18 @@ class PanelsMixin:
                 st["pwndbg_config"].clear()
                 self.toast("Saved pwndbg config cleared (current session unchanged)", "info", 3.0)
         flt = self.cfg_filter.lower().strip()
-        flags = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.pad_outer_x
-                 | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable)
-        began = begin_table_card(self, "##cfg", 3, flags)
-        if not began:
-            end_table_card(began)
+        if self.cfg_card is None:
+            fixed = imgui.TableColumnFlags_.width_fixed
+            self.cfg_card = TableCard(self, "##cfg", [
+                ("Parameter", fixed, lambda: imgui.get_font_size() * 14),
+                ("Value", fixed, lambda: imgui.get_font_size() * 12),
+                ("Description", imgui.TableColumnFlags_.width_stretch),
+            ], imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.pad_outer_x
+               | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable, framed=True)
+        card = self.cfg_card
+        if not card.begin():
+            card.end()
             return
-        imgui.table_setup_scroll_freeze(0, 1)
-        imgui.table_setup_column("Parameter", imgui.TableColumnFlags_.width_fixed, imgui.get_font_size() * 14)
-        imgui.table_setup_column("Value", imgui.TableColumnFlags_.width_fixed, imgui.get_font_size() * 12)
-        imgui.table_setup_column("Description", imgui.TableColumnFlags_.width_stretch)
-        imgui.table_headers_row()
         scope = None
         for p in self.config:
             if flt and flt not in p["name"] and flt not in p["doc"].lower():
@@ -430,16 +426,19 @@ class PanelsMixin:
                 imgui.text_colored(v4(th.accent), scope.upper())
             imgui.table_next_row()
             imgui.table_next_column()
+            card.cell(p["name"])
             imgui.text_unformatted(p["name"])
             imgui.set_item_tooltip(p["help"])
             imgui.table_next_column()
+            card.cell(str(p["value"]))
             imgui.set_next_item_width(-1)
             imgui.push_font(self.mono, self.ui_size)
             self._config_widget(p)
             imgui.pop_font()
             imgui.table_next_column()
+            card.cell(p["doc"])
             imgui.text_disabled(p["doc"])
-        end_table_card(began)
+        card.end()
 
     def _set_config(self, cfg) -> None:
         self.config = cfg
