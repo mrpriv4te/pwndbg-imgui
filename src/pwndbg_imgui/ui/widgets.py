@@ -108,10 +108,13 @@ class TableCard:
         pos, size = imgui.get_window_pos(), imgui.get_window_size()
         self.rect = (pos, ImVec2(pos.x + size.x, pos.y + size.y))
         self.dl = imgui.get_window_draw_list()
-        # a gap between the rows and the scrollbar's grab (the track itself is transparent)
-        imgui.push_style_var(imgui.StyleVar_.scrollbar_padding, 3.0)
-        self.began = imgui.begin_table(self.id, len(self.columns), self.flags)
-        imgui.pop_style_var()
+        # a gap between the rows and the scrollbar's grab (the track itself is transparent):
+        # more padding, and a wider bar by as much, so the grab is as wide as everywhere else
+        gap = 3.0
+        imgui.push_style_var(imgui.StyleVar_.scrollbar_padding, gap)
+        imgui.push_style_var(imgui.StyleVar_.scrollbar_size, style.scrollbar_size + 2 * (gap - style.scrollbar_padding))
+        self.began = imgui.begin_table(self.id, len(self.columns), self.flags, ImVec2(0, 0), self._inner_width())
+        imgui.pop_style_var(2)
         if not self.began:
             return False
         if self.freeze and self.flags & imgui.TableFlags_.scroll_y:
@@ -122,6 +125,23 @@ class TableCard:
         self.prev_cells, self.cells = self.cells, {}
         self.row_tops = []
         return True
+
+    def _inner_width(self) -> float:
+        """With horizontal scrolling, a stretch column only fills the visible width and its
+        long text gets clipped: make the table as wide as the widest texts recorded last
+        frame (or the card, if wider), so it scrolls instead and the last column still fills."""
+        if not self.flags & imgui.TableFlags_.scroll_x or not (self.prev_cells or self.cells):
+            return 0.0
+        pad = imgui.get_style().cell_padding.x * 2 + 1
+        rows = list((self.prev_cells or self.cells).values())
+        total = 0.0
+        for i, (name, cflags, width) in enumerate(self.columns):
+            if cflags & imgui.TableColumnFlags_.width_fixed and width:  # an explicit width
+                total += float(width() if callable(width) else width) + pad  # type: ignore[arg-type]
+                continue
+            texts = [name] + [r[i] for r in rows if i < len(r)]
+            total += max(imgui.calc_text_size(t).x for t in texts) + pad
+        return max(imgui.get_content_region_avail().x, total)
 
     def cell(self, text: str) -> None:
         """Record the current cell's text (call once per cell, in order)."""

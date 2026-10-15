@@ -18,7 +18,8 @@ if TYPE_CHECKING:
 
 STRETCH = imgui.TableColumnFlags_.width_stretch
 TABLE_FLAGS = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.pad_outer_x
-               | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable | imgui.TableFlags_.sizing_fixed_fit)
+               | imgui.TableFlags_.scroll_x | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable
+               | imgui.TableFlags_.sizing_fixed_fit)
 
 
 class VmmapPane:

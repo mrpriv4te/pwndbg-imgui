@@ -103,7 +103,7 @@ class PanelsMixin:
             hint = "gdb is busy — commands are queued"
         else:
             hint = "gdb / pwndbg command  (Tab: complete, ↑↓: history)"
-        imgui.push_font(self.mono, self.code_size)
+        imgui.push_font(self.mono, self.ui_size)  # an input box: sized like the UI, not the code panes
         entered, self.console_input = imgui.input_text_with_hint("##console_in", hint, self.console_input, flags, self._console_cb)
         imgui.pop_font()
         if (not entered and self.console_input.strip() and debug_enabled()
@@ -267,10 +267,11 @@ class PanelsMixin:
             self.io_view.render(-footer)
             self.io.resize(self.io_view.rows, self.io_view.cols)
 
+        imgui.align_text_to_frame_padding()  # center the icon on the input box's line
         imgui.text_colored(v4(th.accent2), fa.ICON_FA_KEYBOARD)
         imgui.same_line()
         imgui.set_next_item_width(-buttons_width("Send"))
-        imgui.push_font(self.mono, self.code_size)
+        imgui.push_font(self.mono, self.ui_size)  # an input box: sized like the UI, not the code panes
         entered, self.io_input = imgui.input_text_with_hint(
             "##io_in", "input for the program (Enter to send, Up/Down: history)", self.io_input,
             imgui.InputTextFlags_.enter_returns_true | imgui.InputTextFlags_.callback_history, self._io_history_cb)
@@ -410,7 +411,7 @@ class PanelsMixin:
                 ("Value", fixed, lambda: imgui.get_font_size() * 12),
                 ("Description", imgui.TableColumnFlags_.width_stretch),
             ], imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.pad_outer_x
-               | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable, framed=True)
+               | imgui.TableFlags_.scroll_x | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable, framed=True)
         card = self.cfg_card
         if not card.begin():
             card.end()

@@ -213,7 +213,7 @@ a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
 - **🎨 Appearance** — 13 themes (dark and light, contrast auto-corrected), a themed title bar
   (drag to move, double-click to maximize: moves go through the window manager, so the
   window can leave the screen and your desktop's tiling / edge snapping works). Windows
-  detached from the main one move the same way; **Shift**+drag one to dock it back. Code zoom (<kbd>Ctrl</kbd>+wheel), system fonts,
+  detached from the main one move the same way; **Shift**+drag one to dock it back. Zoom with <kbd>Ctrl</kbd>+wheel (UI and code text together), system fonts,
   persistent layout and settings (`~/.config/pwndbg-imgui/`).
 
 ---
@@ -225,7 +225,7 @@ a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
 | <kbd>F5</kbd> | Continue / Run | | <kbd>Ctrl</kbd>+<kbd>P</kbd> | Palette |
 | <kbd>F6</kbd> | Pause | | <kbd>Ctrl</kbd>+<kbd>G</kbd> | Go to (same palette) |
 | <kbd>F7</kbd> / <kbd>F8</kbd> | Step / Next (instruction) | | <kbd>Ctrl</kbd>+<kbd>F</kbd> | Find |
-| <kbd>⇧</kbd>+<kbd>F7</kbd> / <kbd>F8</kbd> | Step / Next (source) | | <kbd>Ctrl</kbd>+wheel | Zoom code |
+| <kbd>⇧</kbd>+<kbd>F7</kbd> / <kbd>F8</kbd> | Step / Next (source) | | <kbd>Ctrl</kbd>+wheel | Zoom (UI + code) |
 | <kbd>Ctrl</kbd>+<kbd>F7</kbd> | Finish | | <kbd>⇧</kbd>+<kbd>F5</kbd> | Kill |
 
 <sub>Full list: <strong>Help → Keyboard shortcuts</strong> menu.</sub>

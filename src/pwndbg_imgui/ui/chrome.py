@@ -79,20 +79,30 @@ class ChromeMixin:
             elif pressed(K.g):
                 self.palette_open = True
             elif pressed(K.equal) or pressed(K.keypad_add):
-                self.set_code_size(self.code_size + 1)
+                self.zoom(1)
             elif pressed(K.minus) or pressed(K.keypad_subtract):
-                self.set_code_size(self.code_size - 1)
+                self.zoom(-1)
             elif pressed(K._0):
-                self.set_code_size(float(Settings.DEFAULTS["code_size"]))
+                self.zoom_reset()
             elif pressed(K.grave_accent):
                 self.focus_window(f"{fa.ICON_FA_TERMINAL} Console")
                 self.focus_console = True
         if io.key_ctrl and io.mouse_wheel and imgui.is_window_hovered(imgui.HoveredFlags_.any_window):
-            self.set_code_size(self.code_size + (1 if io.mouse_wheel > 0 else -1))
+            self.zoom(1 if io.mouse_wheel > 0 else -1)
             io.mouse_wheel = 0.0
 
     def set_code_size(self, size: float) -> None:
         self.code_size = max(8.0, min(40.0, size))
+
+    def zoom(self, step: int) -> None:
+        """Ctrl+wheel / Ctrl+= / Ctrl+-: UI and code text together (each within its range,
+        so their difference is kept until one hits a limit)."""
+        self.ui_size = max(10.0, min(26.0, self.ui_size + step))
+        self.set_code_size(self.code_size + step)
+
+    def zoom_reset(self) -> None:
+        self.ui_size = float(Settings.DEFAULTS["ui_size"])
+        self.set_code_size(float(Settings.DEFAULTS["code_size"]))
 
     def show_menus(self) -> None:
         dp = hello_imgui.get_runner_params().docking_params
@@ -551,7 +561,8 @@ class ChromeMixin:
                 ("F6", "Pause (interrupt)"), ("F7 / F8", "Step into / over (instruction)"),
                 ("Shift+F7 / Shift+F8", "Step / next (source line)"), ("Ctrl+F7", "Step out (finish)"),
                 ("Ctrl+P / Ctrl+G", "Go to (address, symbol, expression) / command palette"), ("Ctrl+`", "Focus console"),
-                ("Ctrl+= / Ctrl+- / Ctrl+0", "Zoom code font"), ("Ctrl+wheel", "Zoom code font"),
+                ("Ctrl+= / Ctrl+- / Ctrl+0", "Zoom in / out / reset (UI and code text)"),
+                ("Ctrl+wheel", "Zoom (UI and code text)"),
                 ("Ctrl+F / F3", "Find in a text pane"), ("Ctrl+C / Ctrl+A", "Copy / select all in a text pane"),
                 ("Ctrl+click address", "Open address in Memory"), ("Right-click", "Context actions everywhere"),
                 ("Click the gutter", "Toggle breakpoint (Disassembly, Source)"),
