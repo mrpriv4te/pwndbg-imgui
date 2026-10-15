@@ -247,7 +247,12 @@ class ChromeMixin:
             if imgui.is_mouse_down(0):
                 (sx, sy), (wx, wy), moved = self.titlebar_drag
                 x, y = nw.cursor()
-                if moved or abs(x - sx) + abs(y - sy) > 4:
+                if not moved and abs(x - sx) + abs(y - sy) > 4 and nw.wm_move():
+                    # the window manager drives the move now (and gets the button release):
+                    # release the button on ImGui's side so it doesn't stay "held"
+                    imgui.get_io().add_mouse_button_event(0, False)
+                    self.titlebar_drag = None
+                elif moved or abs(x - sx) + abs(y - sy) > 4:
                     if not moved and nw.maximized():
                         nw.toggle_maximize()  # dragging a maximized window un-maximizes it
                     self.titlebar_drag = ((sx, sy), (wx, wy), True)

@@ -25,3 +25,12 @@ def test_vmmap_filter(flt, expected):
     pane = VmmapPane(app=None)  # type: ignore[arg-type]  # matches() doesn't use the app
     pane.filter = flt
     assert [i for i, p in enumerate(PAGES) if pane.matches(p)] == expected
+
+
+def test_x11_client_message_has_the_size_of_xevent():
+    import ctypes
+
+    from pwndbg_imgui.ui.native import XClientMessageEvent
+
+    assert ctypes.sizeof(XClientMessageEvent) == 24 * ctypes.sizeof(ctypes.c_long)  # sizeof(XEvent)
+    assert XClientMessageEvent.l.offset == 7 * ctypes.sizeof(ctypes.c_long)  # data.l, as in <X11/Xlib.h>

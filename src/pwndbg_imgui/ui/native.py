@@ -2,9 +2,18 @@
 
 from __future__ import annotations
 
+import ctypes
 import os
 
 from imgui_bundle import hello_imgui
+
+
+class XClientMessageEvent(ctypes.Structure):
+    """Xlib's XClientMessageEvent, padded to sizeof(XEvent) (24 longs)."""
+
+    _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong), ("send_event", ctypes.c_int),
+                ("display", ctypes.c_void_p), ("window", ctypes.c_ulong), ("message_type", ctypes.c_ulong),
+                ("format", ctypes.c_int), ("l", ctypes.c_long * 5), ("pad", ctypes.c_long * 12)]
 
 
 class NativeWindow:
@@ -14,6 +23,7 @@ class NativeWindow:
     MAXIMIZED = 0x00020008
     FOCUSED = 0x00020001
     PLATFORM_WAYLAND = 0x00060003
+    PLATFORM_X11 = 0x00060004
 
     def __init__(self) -> None:
         import ctypes
@@ -45,9 +55,65 @@ class NativeWindow:
         if not self.win.value:
             raise OSError("no GLFW window")
         self.can_move = True
+        self.platform = 0
         if hasattr(lib, "glfwGetPlatform"):
             lib.glfwGetPlatform.restype = ctypes.c_int
-            self.can_move = lib.glfwGetPlatform() != self.PLATFORM_WAYLAND  # Wayland forbids it
+            self.platform = lib.glfwGetPlatform()
+            self.can_move = self.platform != self.PLATFORM_WAYLAND  # Wayland forbids it
+        self._x11 = None  # (libX11, Display*, Window, root, _NET_WM_MOVERESIZE atom), set up on first use
+
+    def _x11_setup(self) -> bool:
+        """Resolve libX11, the X display / window and the _NET_WM_MOVERESIZE atom, once."""
+        if self.platform != self.PLATFORM_X11:
+            return False
+        if self._x11 is not None:
+            return True
+        ct = self.ct
+        try:
+            import ctypes.util
+
+            x11 = ct.CDLL(ctypes.util.find_library("X11") or "libX11.so.6")
+            self.lib.glfwGetX11Display.restype = ct.c_void_p
+            self.lib.glfwGetX11Window.restype = ct.c_ulong
+            self.lib.glfwGetX11Window.argtypes = [ct.c_void_p]
+            x11.XInternAtom.restype = ct.c_ulong
+            x11.XInternAtom.argtypes = [ct.c_void_p, ct.c_char_p, ct.c_int]
+            x11.XDefaultRootWindow.restype = ct.c_ulong
+            x11.XDefaultRootWindow.argtypes = [ct.c_void_p]
+            x11.XUngrabPointer.argtypes = [ct.c_void_p, ct.c_ulong]
+            x11.XSendEvent.argtypes = [ct.c_void_p, ct.c_ulong, ct.c_int, ct.c_long, ct.c_void_p]
+            x11.XFlush.argtypes = [ct.c_void_p]
+            dpy = self.lib.glfwGetX11Display()
+            xwin = self.lib.glfwGetX11Window(self.win)
+            if not dpy or not xwin:
+                return False
+            self._x11 = (x11, dpy, xwin, x11.XDefaultRootWindow(dpy),
+                         x11.XInternAtom(dpy, b"_NET_WM_MOVERESIZE", 0))
+        except (OSError, AttributeError):
+            return False
+        return True
+
+    def wm_move(self) -> bool:
+        """Hand a title-bar drag to the window manager (X11 `_NET_WM_MOVERESIZE`), as a
+        native title bar does: the WM then moves the window itself, so it can leave the
+        screen and edge tiling / snapping work (a window moved by the app is constrained
+        and never tiled). Returns False when unavailable; the caller moves it instead."""
+        if not self._x11_setup() or self._x11 is None:
+            return False
+        ct = self.ct
+        try:
+            x11, dpy, xwin, root, atom = self._x11
+
+            x, y = self.cursor()
+            ev = XClientMessageEvent(type=33, send_event=1, display=dpy, window=xwin, message_type=atom, format=32)
+            ev.l[:] = [int(x), int(y), 8, 1, 1]  # root x/y, _NET_WM_MOVERESIZE_MOVE, button 1, from an app
+            x11.XUngrabPointer(dpy, 0)  # the WM can only grab the pointer if we let it go
+            mask = (1 << 20) | (1 << 19)  # SubstructureRedirectMask | SubstructureNotifyMask
+            x11.XSendEvent(dpy, root, 0, mask, ct.byref(ev))
+            x11.XFlush(dpy)
+            return True
+        except (OSError, AttributeError):
+            return False
 
     def iconify(self) -> None:
         self.lib.glfwIconifyWindow(self.win)
