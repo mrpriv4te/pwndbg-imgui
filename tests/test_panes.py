@@ -34,3 +34,16 @@ def test_x11_client_message_has_the_size_of_xevent():
 
     assert ctypes.sizeof(XClientMessageEvent) == 24 * ctypes.sizeof(ctypes.c_long)  # sizeof(XEvent)
     assert XClientMessageEvent.l.offset == 7 * ctypes.sizeof(ctypes.c_long)  # data.l, as in <X11/Xlib.h>
+
+
+def test_imgui_bindings_used_by_the_detached_view_drag():
+    # App.handoff_viewport_drag only runs during a real drag, so a renamed binding would
+    # only show up then (it did: ViewportP has no `id`): check the names it relies on
+    from imgui_bundle import imgui
+
+    assert hasattr(imgui.internal.Context, "moving_window")
+    for name in ("viewport_id", "viewport_owned"):
+        assert hasattr(imgui.internal.Window, name), name
+    for name in ("id_", "platform_handle"):
+        assert hasattr(imgui.Viewport, name), name
+    assert callable(imgui.find_viewport_by_id) and callable(imgui.internal.clear_active_id)

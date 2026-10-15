@@ -639,10 +639,12 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         if ctl is None or io.key_shift or not imgui.is_mouse_dragging(0, 4.0):
             return
         moving = imgui.get_current_context().moving_window
-        if moving is None or not moving.viewport_owned or moving.viewport is None:
+        if moving is None or not moving.viewport_owned:
             return
-        vp = moving.viewport
-        if vp.id == imgui.get_main_viewport().id:
+        # moving.viewport is an internal ViewportP without id / platform_handle in the
+        # bindings: look the public Viewport up by id instead
+        vp = imgui.find_viewport_by_id(moving.viewport_id)
+        if vp is None or vp.id_ == imgui.get_main_viewport().id_:
             return
         handle = capsule_pointer(vp.platform_handle)
         if handle and ctl.wm_move(handle):
