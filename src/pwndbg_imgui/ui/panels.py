@@ -304,8 +304,8 @@ class PanelsMixin:
                 addr_flt = int(flt, 16)
             except ValueError:
                 pass
-        flags = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.scroll_y
-                 | imgui.TableFlags_.resizable | imgui.TableFlags_.sizing_fixed_fit)
+        flags = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.pad_outer_x
+                 | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable | imgui.TableFlags_.sizing_fixed_fit)
         imgui.push_font(self.mono, self.code_size)
         if imgui.begin_table("##vmmap", 6, flags):
             imgui.table_setup_scroll_freeze(0, 1)
@@ -379,8 +379,8 @@ class PanelsMixin:
         if not self.bps:
             imgui.text_disabled("No breakpoints. Click the gutter of Disassembly/Source, or add one above.")
             return
-        flags = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.scroll_y
-                 | imgui.TableFlags_.resizable | imgui.TableFlags_.sizing_fixed_fit)
+        flags = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.pad_outer_x
+                 | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable | imgui.TableFlags_.sizing_fixed_fit)
         if imgui.begin_table("##bps", 7, flags):
             imgui.table_setup_scroll_freeze(0, 1)
             for col in ("", "#", "Type", "Where", "Address", "Hits"):
@@ -514,8 +514,8 @@ class PanelsMixin:
                 st["pwndbg_config"].clear()
                 self.toast("Saved pwndbg config cleared (current session unchanged)", "info", 3.0)
         flt = self.cfg_filter.lower().strip()
-        flags = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.scroll_y
-                 | imgui.TableFlags_.resizable)
+        flags = (imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_v | imgui.TableFlags_.pad_outer_x
+                 | imgui.TableFlags_.scroll_y | imgui.TableFlags_.resizable)
         if not imgui.begin_table("##cfg", 3, flags):
             return
         imgui.table_setup_scroll_freeze(0, 1)

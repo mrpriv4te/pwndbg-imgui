@@ -518,7 +518,8 @@ class ChromeMixin:
                 ("Tab / Up / Down (console)", "Complete / history; empty Enter repeats the last command"),
                 ("Ctrl+L (console)", "Clear console"),
             ]
-            if imgui.begin_table("##keys", 2, imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h):
+            if imgui.begin_table("##keys", 2, imgui.TableFlags_.row_bg | imgui.TableFlags_.borders_inner_h
+                                                    | imgui.TableFlags_.pad_outer_x):
                 for k, d in rows:
                     imgui.table_next_row()
                     imgui.table_next_column()
