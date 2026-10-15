@@ -14,7 +14,7 @@ from imgui_bundle import ImVec2, hello_imgui, imgui
 from imgui_bundle import icons_fontawesome_6 as fa
 from .. import APP_NAME
 from .. import agent
-from ..agent import ENV_FD, ENV_INIT, ENV_TTY, SECTIONS
+from ..agent import ENV_FD, ENV_INIT, ENV_TTY, SECTIONS, debug
 from ..fonts import find_mono_fonts
 from ..settings import Settings, config_dir
 from ..term import Term, strip_ansi
@@ -363,6 +363,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
                 try:
                     handler(msg)
                 except Exception as e:  # never let one bad message kill the UI
+                    debug(f"event {ev}")
                     self.toast(f"internal error in {ev}: {e}", "error")
 
     def on_hello(self, msg) -> None:

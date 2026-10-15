@@ -68,7 +68,8 @@ gdb   -q -batch -ex 'init-pwndbg' -ex 'version'  # manual `init-pwndbg` command
 With [pipx](https://pipx.pypa.io), in its own environment (imgui-bundle included):
 
 ```bash
-pipx install .                 # from this folder
+pipx install git+https://github.com/mrpriv4te/pwndbg-imgui   # straight from GitHub
+pipx install .                 # from a clone of this repo
 pipx install -e .              # for development: code changes are picked up live
 pipx upgrade pwndbg-imgui      # after a `git pull` (without -e: `pipx install --force .`)
 ```
@@ -91,7 +92,12 @@ pwndbg-imgui -ex 'target remote :1234' ./chall
 
 GUI options: `--gdb PATH`, `--pwndbg PATH`, `--init-cmd CMD`, `--no-pwndbg`,
 `--theme NAME`, `--font PATH`, `--font-size N`, `--no-io`, `--no-viewports`, `--maximize`,
-`--reset-layout`, `--list-themes`, `--version` (see `--help`).
+`--reset-layout`, `--list-themes`, `--version`, `--debug` (see `--help`).
+
+Something misbehaving? Run with `--debug` (or set `PWNDBG_IMGUI_DEBUG=1`, which also
+works for the attached mode): errors that are normally handled silently, on both the
+GUI and the gdb side, are logged with tracebacks to `~/.cache/pwndbg-imgui-debug.log`.
+Please attach that file to bug reports.
 
 ### 🔗 Attach to an existing gdb session
 

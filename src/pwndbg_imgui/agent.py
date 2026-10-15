@@ -16,6 +16,8 @@ import threading
 
 APP_NAME = "pwndbg-imgui"
 
+REPO_URL = "https://github.com/mrpriv4te/pwndbg-imgui"
+
 ENV_FD = "PWNDBG_IMGUI_FD"
 
 
@@ -23,6 +25,36 @@ ENV_TTY = "PWNDBG_IMGUI_TTY"
 
 
 ENV_INIT = "PWNDBG_IMGUI_INIT"
+
+
+ENV_DEBUG = "PWNDBG_IMGUI_DEBUG"
+
+
+def debug_log_path() -> str:
+    cache = os.environ.get("XDG_CACHE_HOME") or os.path.expanduser("~/.cache")
+    return os.path.join(cache, f"{APP_NAME}-debug.log")
+
+
+def debug(where: str) -> None:
+    """Log the exception being handled, with $PWNDBG_IMGUI_DEBUG set (`--debug`).
+
+    Many errors are deliberately swallowed (a symbol that doesn't resolve, a
+    section that can't render); this makes them visible when something breaks.
+    Shared by both sides: the GUI imports this module, gdb loads it by path."""
+    if not os.environ.get(ENV_DEBUG):
+        return
+    import time
+    import traceback
+
+    side = "gui" if __name__ == "pwndbg_imgui.agent" else "agent"
+    exc = traceback.format_exc() if sys.exc_info()[0] is not None else ""
+    try:
+        path = debug_log_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a") as f:
+            f.write(f"{time.strftime('%Y-%m-%d %H:%M:%S')} [{side} {os.getpid()}] {where}\n{exc}")
+    except OSError:
+        pass
 
 
 SECTIONS = (
@@ -129,6 +161,7 @@ class Agent:
             res = fn(**req.get("args", {}))
             out = {"id": rid, "ok": True, "res": res}
         except Exception as e:  # report every failure to the GUI
+            debug(f"op {op}({req.get('args')})")
             out = {"id": rid, "ok": False, "err": str(e).strip() or type(e).__name__}
         if rid is not None:
             self.send(out)
@@ -208,6 +241,7 @@ class Agent:
                 try:
                     data = getattr(self, self.FALLBACKS[name])()
                 except Exception as e:
+                    debug(f"section fallback {name}")
                     data = f"\x1b[90m({e})\x1b[0m"
             self.send({"ev": "section", "name": name, "text": data})
 
@@ -327,7 +361,7 @@ class Agent:
             try:
                 registry.disconnect(callback)
             except Exception:
-                pass
+                debug("disconnect event handler")
         self.handlers.clear()
         if self.ctx is not None:
             for name in self.writers:
@@ -376,7 +410,7 @@ class Agent:
             bps = [b for b in self.op_breakpoints() if b["num"] != exclude]
             self.send({"ev": "bps", "bps": bps})
         except Exception:
-            pass
+            debug("send_breakpoints")
 
     # -- helpers ------------------------------------------------------------
     def thread_stopped(self) -> bool:
@@ -397,6 +431,7 @@ class Agent:
 
             return vmmap.find(addr)
         except Exception:
+            debug(f"vmmap.find({addr:#x})")
             return None
 
     @staticmethod
@@ -429,6 +464,7 @@ class Agent:
             conn = self.gdb.selected_inferior().connection
             return conn is not None and conn.type in ("remote", "extended-remote")
         except Exception:
+            debug("target_is_remote")
             return False
 
     def op_info(self) -> dict:
@@ -471,6 +507,7 @@ class Agent:
 
                         st["sym"] = pwndbg.aglib.symbol.resolve_addr(st["pc"])
                     except Exception:
+                        debug("state: resolve pc symbol")
                         st["sym"] = st["func"]
         except gdb.error:
             pass
@@ -595,11 +632,11 @@ class Agent:
                 try:
                     info["chain"] = pwndbg.chain.format(a)
                 except Exception:
-                    pass
+                    debug(f"addrinfo: chain {a:#x}")
             try:
                 info["sym"] = pwndbg.aglib.symbol.resolve_addr(a)
             except Exception:
-                pass
+                debug(f"addrinfo: symbol {a:#x}")
             out[str(a)] = info
         return out
 
@@ -630,7 +667,7 @@ class Agent:
                         }
                     )
                 except Exception:
-                    pass
+                    debug("breakpoints: location")
             out.append(
                 {
                     "num": b.number,
@@ -696,6 +733,7 @@ class Agent:
             try:
                 help_text = c.parser.format_help()
             except Exception:
+                debug(f"commands: help for {getattr(c, 'command_name', c)}")
                 help_text = getattr(c, "description", "") or ""
             out.append(
                 {
@@ -745,6 +783,7 @@ class Agent:
         try:
             import pwndbg.dintegration as di
         except Exception:
+            debug("decomp_status: import pwndbg.dintegration")
             return {"available": False, "connected": False}
         m = di.manager
         cfg = self.pwndbg.config if self.pwndbg is not None else None
@@ -773,7 +812,7 @@ class Agent:
 
             sym = pwndbg.aglib.symbol.resolve_addr(addr)
         except Exception:
-            pass
+            debug("decompile: resolve symbol")
         return {"connected": True, "name": m.decompiler_name(), "addr": addr, "sym": sym, "lines": lines}
 
     def op_quit(self) -> None:
@@ -830,7 +869,8 @@ def _attach(gui_args: str) -> None:
                              pass_fds=(child.fileno(),), start_new_session=True)
     except OSError as e:
         parent.close()
-        print(f"[{APP_NAME}] cannot start `{cmd[0]}` ({e}). Install it with: pipx install pwndbg-imgui")
+        print(f"[{APP_NAME}] cannot start `{cmd[0]}` ({e}). Is pwndbg-imgui installed and on PATH? "
+              f"See {REPO_URL}")
         return
     finally:
         child.close()

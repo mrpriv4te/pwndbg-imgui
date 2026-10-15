@@ -7,6 +7,7 @@ import shutil
 import sys
 
 from . import APP_NAME, __version__
+from .agent import ENV_DEBUG, REPO_URL, debug_log_path
 from .settings import config_dir
 from .theme import THEMES
 
@@ -105,6 +106,8 @@ GUI options:
   --exploit [PATH]    write a pwntools exploit template (./exploit.py, or PATH)
                       with the pwndbg-imgui `-d ui` integration; prints to stdout
                       when piped (pwndbg-imgui --exploit > exploit.py)
+  --debug             log swallowed errors (GUI and gdb side) to
+                      {debug_log_path()}
   --version           print the pwndbg-imgui version and exit
   -h, --help          show this help
 
@@ -159,6 +162,8 @@ def parse_args(argv: list[str]) -> LaunchConfig:
         elif a in ("-h", "--help"):
             print(usage())
             sys.exit(0)
+        elif a == "--debug":
+            os.environ[ENV_DEBUG] = "1"  # inherited by gdb, so the agent logs too
         elif a == "--version":
             print(f"{APP_NAME} {__version__}")
             sys.exit(0)
@@ -231,8 +236,11 @@ def main(argv: list[str] | None = None) -> int:
     try:
         from .ui.app import App  # imgui_bundle is only needed past this point
     except ImportError as e:
-        print(f"{APP_NAME}: cannot load the GUI ({e}); install with: pipx install pwndbg-imgui", file=sys.stderr)
+        print(f"{APP_NAME}: cannot load the GUI ({e}); reinstall it with pipx, e.g.\n"
+              f"  pipx install --force git+{REPO_URL}", file=sys.stderr)
         return 1
+    if os.environ.get(ENV_DEBUG):
+        print(f"{APP_NAME}: debug log: {debug_log_path()}", file=sys.stderr)
     try:
         return App(cfg).run()
     except KeyboardInterrupt:  # forced (second Ctrl-C); cleanup already ran
