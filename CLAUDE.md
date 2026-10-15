@@ -157,7 +157,13 @@ Gotchas when testing:
 
 1. Lint clean and `pytest` green (commands above); CI green on `main`.
 2. `tools/guitest.py` smoke run passes; look at the screenshots.
-3. Commit (only when asked), then `git tag vX.Y.Z` and push the branch **and** the tag.
+3. Commit (only when asked), then `git tag -a vX.Y.Z -m "pwndbg-imgui X.Y.Z"` and push the
+   branch **and** the tag.
+4. The tag's CI run publishes the GitHub Release automatically (`release` job: notes from
+   `tools/release-notes.sh` = commit subjects since the previous tag, wheel + sdist
+   attached; a tag with letters, e.g. `v1.4.0rc1`, becomes a prerelease). So commit
+   subjects are the changelog — keep them meaningful. Not published to PyPI (yet).
+   Check it with `gh run watch` / `gh release view vX.Y.Z`.
 
 ## Conventions
 

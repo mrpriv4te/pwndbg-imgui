@@ -1,0 +1,61 @@
+name: Bug report
+description: Something doesn't work or looks wrong
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead. Screenshots help for UI issues.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The command you ran and the steps in the GUI. A small binary or a public CTF challenge helps.
+      placeholder: |
+        pwndbg-imgui ./chall
+        b main, run, then open View > VMMap...
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: How was pwndbg-imgui started?
+      options:
+        - "pwndbg-imgui ./binary (launched by the GUI)"
+        - "init-pwndbg-imgui inside gdb (attached)"
+        - "From pwntools (exploit.py -d ui / gdb.debug)"
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: Paste the output of these commands.
+      value: |
+        pwndbg-imgui --version:
+        gdb --version (first line):
+        pwndbg version (`pwndbg -q -batch -ex version`, or `gdb -q -batch -ex version`):
+        Distro:
+      render: text
+    validations:
+      required: true
+  - type: dropdown
+    id: session
+    attributes:
+      label: Desktop session
+      description: "`echo $XDG_SESSION_TYPE`"
+      options: [X11, Wayland, Other / unknown]
+    validations:
+      required: true
+  - type: textarea
+    id: log
+    attributes:
+      label: Debug log
+      description: >
+        Run again with `--debug` (or `PWNDBG_IMGUI_DEBUG=1` for the attached mode), reproduce,
+        then paste `~/.cache/pwndbg-imgui-debug.log`, plus any traceback printed in the terminal.
+      render: text

@@ -43,3 +43,31 @@ jobs:
           pwndbg-imgui --exploit | grep -q "from pwn import"  # template shipped as package data
           test -f "$(pwndbg-imgui --agent-path)"
           python -c "import pwndbg_imgui.ui.app"  # the GUI imports with imgui-bundle installed
+
+  # on a v* tag, once tests and packaging pass: publish a GitHub Release with the
+  # commit list since the previous tag and the built wheel + sdist attached
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test, package]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      - name: Build wheel and sdist
+        run: pip install build && python -m build
+      - name: Create the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          tools/release-notes.sh "$TAG" > notes.md
+          flags=""
+          case "${TAG#v}" in *[a-z]*) flags="--prerelease" ;; esac  # e.g. v1.4.0rc1
+          gh release create "$TAG" dist/* --verify-tag --title "pwndbg-imgui ${TAG#v}" \
+            --notes-file notes.md $flags
