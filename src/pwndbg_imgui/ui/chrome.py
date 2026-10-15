@@ -114,7 +114,10 @@ class ChromeMixin:
             imgui.text_colored(v4(self.theme.accent), f"{fa.ICON_FA_BUG} pwndbg")
             imgui.dummy(ImVec2(4, 0))
         if imgui.begin_menu("Debug"):
-            for label, icon, shortcut, enabled, cb in self.actions():
+            actions = self.actions()
+            for label, icon, shortcut, enabled, cb in actions:
+                if label == "Refresh context":
+                    continue  # with the context items below
                 if imgui.menu_item_simple(f"{getattr(fa, 'ICON_FA_' + icon)}  {label}", shortcut, False, enabled):
                     cb()
             imgui.separator()
@@ -131,8 +134,9 @@ class ChromeMixin:
                 self.exec("contextprev", refresh=False, quiet=True)
             if imgui.menu_item_simple(f"{fa.ICON_FA_CHEVRON_RIGHT}  Next context", "", False, self.pwndbg_has("contextnext")):
                 self.exec("contextnext", refresh=False, quiet=True)
-            if imgui.menu_item_simple(f"{fa.ICON_FA_ARROWS_ROTATE}  Refresh context"):
-                self.rpc.request("context")
+            refresh = next(a for a in actions if a[0] == "Refresh context")
+            if imgui.menu_item_simple(f"{fa.ICON_FA_ARROWS_ROTATE}  Refresh context", "", False, refresh[3]):
+                refresh[4]()
             imgui.separator()
             if imgui.menu_item_simple(f"{fa.ICON_FA_XMARK}  Quit", "Alt+F4"):
                 hello_imgui.get_runner_params().app_shall_exit = True
