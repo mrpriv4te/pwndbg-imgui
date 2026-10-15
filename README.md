@@ -251,9 +251,11 @@ window, and the **pwndbg Config** pane — so you rarely edit the file by hand. 
   `fps_idle`.
 - **Behavior** — `autofit`, `remember_bps`, `persist_pwndbg_config`, `decomp_autoconnect`,
   `io_raw` / `io_echo` / `io_newline`.
-- **Remembered state** — `console_history` and `io_history`, `views` (open command views),
-  `pwndbg_config` (pwndbg parameters you changed, re-applied each run), and `binaries`
-  (per-binary breakpoints and run arguments).
+- **Remembered state** — `console_history` and `io_history`, `pwndbg_config` (pwndbg
+  parameters you changed, re-applied each run), and `binaries`: per binary, its breakpoints,
+  run arguments, open command views and context watches (`contextwatch`), restored when
+  you debug it again. (`views` at the top level is the pre-1.5 global list, used for
+  binaries without their own.)
 
 To reset: delete the file (or the whole directory) to restore defaults, or pass
 `--reset-layout` to rebuild just the default window layout. Breakpoints are offered for

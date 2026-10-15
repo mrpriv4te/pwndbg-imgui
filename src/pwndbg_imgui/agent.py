@@ -915,6 +915,23 @@ class Agent:
             )
         return out
 
+    def op_watches(self) -> list:
+        """pwndbg's context watches (contextwatch), as [expression, "eval" | "execute"]."""
+        if self.ctx is None:
+            return []
+        return [[expr, cmd] for expr, cmd in self.ctx.expressions]
+
+    def op_add_watches(self, watches: list) -> None:
+        """Add context watches (saved for this binary), skipping ones already there."""
+        if self.ctx is None:
+            return
+        have = {(expr, cmd) for expr, cmd in self.ctx.expressions}
+        for expr, cmd in watches:
+            if cmd in ("eval", "execute") and (expr, cmd) not in have:
+                self.ctx.expressions.append((expr, cmd))
+                have.add((expr, cmd))
+        self.refresh_context()
+
     def op_params(self, names: list) -> dict:
         """Current values of a few pwndbg parameters, by their gdb name (show-flags...)."""
         if self.pwndbg is None:

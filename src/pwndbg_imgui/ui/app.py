@@ -87,6 +87,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.addr_pending: set[int] = set()
         self.inline_cache: dict[str, Term] = {}
         self.commands: list | None = None
+        self.watches: list | None = None  # pwndbg's context watches, as last read from gdb
+        self.views_restored = False
         self.toasts: list[dict] = []
         self.layout_sent = None
         self.layout_pending = (None, 0.0)
@@ -382,9 +384,37 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.rpc.request("commands", self._set_commands)
         self.refresh_checksec()
         self.restore_breakpoints()
+        self.restore_views()
         if self.info.get("pwndbg"):
             self.apply_pwndbg_config()
+            self.restore_watches()
         self.layout_sent = None
+
+    # per-binary views and watches ---------------------------------------------
+    def restore_views(self) -> None:
+        """Open the command views saved for this binary (older settings: the global list)."""
+        if self.views_restored:
+            return
+        self.views_restored = True
+        saved = self.settings.binary(self.cfg.binary)
+        views = saved["views"] if "views" in saved else self.settings["views"]
+        open_cmds = {v.cmd for v in self.cmd_views}
+        for v in views:
+            if isinstance(v, dict) and v.get("cmd") and v["cmd"] not in open_cmds:
+                self.open_cmd_view(v["cmd"], auto=v.get("auto", True), restored=True)
+
+    def restore_watches(self) -> None:
+        saved = self.settings.binary(self.cfg.binary).get("watches")
+        if saved and self.rpc:
+            self.rpc.request("add_watches", lambda _r: self.fetch_watches(), self.error_toast, watches=saved)
+
+    def fetch_watches(self) -> None:
+        if self.rpc and self.info.get("pwndbg"):
+            self.rpc.request("watches", self._set_watches)
+
+    def _set_watches(self, watches) -> None:
+        self.watches = watches  # what persist() saves for this binary
+
 
     def _set_commands(self, cmds) -> None:
         self.commands = cmds
@@ -426,6 +456,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.gdb_idle = True  # sent right before gdb shows its prompt
         was_alive = self.is_alive()
         self.state = msg.get("state", {})
+        self.fetch_watches()  # at each prompt: the console may have added or removed some
         if self.is_alive() and not was_alive:
             self.refresh_checksec()
         if self.is_stopped() and self.refreshed_gen != self.dirty_gen:
@@ -700,9 +731,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
                                "disable the themed title bar in Preferences.", "warn", 10)
             except (OSError, AttributeError) as e:
                 self.toast(f"Themed title bar unavailable: {e}", "warn", 6)
-        for v in self.settings["views"]:
-            if isinstance(v, dict) and v.get("cmd"):
-                self.open_cmd_view(v["cmd"], auto=v.get("auto", True), restored=True)
+        if self.cfg.binary is not None:  # attached mode learns the binary from gdb's hello
+            self.restore_views()
 
     def before_exit(self) -> None:
         self.exiting = True
@@ -714,7 +744,11 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.last_persist = time.monotonic()
         self.save_breakpoints()
         st = self.settings
-        st["views"] = [{"cmd": v.cmd, "auto": v.auto} for v in self.cmd_views]
+        per_binary = st.binary(self.cfg.binary)
+        if self.views_restored:  # else the saved views were never opened: keep them
+            per_binary["views"] = [{"cmd": v.cmd, "auto": v.auto} for v in self.cmd_views]
+        if self.watches is not None:  # read from gdb this session (else keep what's saved)
+            per_binary["watches"] = self.watches
         st["console_history"] = self.console_pane.history
         st["io_history"] = self.io_pane.history
         st["ui_size"] = self.ui_size
