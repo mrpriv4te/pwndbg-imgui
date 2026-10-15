@@ -36,6 +36,7 @@ class Settings:
         "io_history": [],
         "binaries": {},
         "views": [],
+        "user_layout": None,  # "Save current layout as default": {ini, visible}
         "visible": {},
     }
 

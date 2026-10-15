@@ -134,7 +134,11 @@ class ChromeMixin:
             for label in self.tool_labels():
                 self._window_toggle(dp, label)
             imgui.separator()
-            if imgui.menu_item_simple(f"{fa.ICON_FA_TABLE_CELLS}  Reset layout"):
+            if imgui.menu_item_simple(f"{fa.ICON_FA_FLOPPY_DISK}  Save current layout as default"):
+                self.save_user_layout()
+            if imgui.menu_item_simple(f"{fa.ICON_FA_ROTATE_LEFT}  Restore my layout", "", False, self.has_user_layout()):
+                self.restore_user_layout()
+            if imgui.menu_item_simple(f"{fa.ICON_FA_TABLE_CELLS}  Reset to built-in layout"):
                 dp.layout_reset = True
                 for dw in dp.dockable_windows:
                     dw.is_visible = self.default_visible.get(dw.label, dw.is_visible)

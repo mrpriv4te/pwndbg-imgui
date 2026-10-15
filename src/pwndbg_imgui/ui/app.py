@@ -47,6 +47,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.ui_size = float(st["ui_size"])
         self.code_size = float(st["code_size"])
         self._slider_edit: dict[str, float] = {}  # deferred-commit scratch (UI-size slider)
+        self._restore_layout_ini: str | None = None  # pending "restore my layout"
         self.char_w = 8.0
         self.line_h = 18.0
         self.mono = None
@@ -577,10 +578,40 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.layout_sent = key
         self.rpc.request("layout", None, self.error_toast, enabled=enabled, geom=geom)
 
+    # ── user-saved layout (View menu) ───────────────────────────────────
+    def has_user_layout(self) -> bool:
+        data = self.settings["user_layout"]
+        return bool(data and data.get("ini"))
+
+    def save_user_layout(self) -> None:
+        dp = hello_imgui.get_runner_params().docking_params
+        self.settings["user_layout"] = {
+            "ini": imgui.save_ini_settings_to_memory(),
+            "visible": {dw.label: dw.is_visible for dw in dp.dockable_windows},
+        }
+        self.settings.save()
+        self.toast(f"{fa.ICON_FA_FLOPPY_DISK}  Current layout saved as your default", "ok", 2.5)
+
+    def restore_user_layout(self) -> None:
+        data = self.settings["user_layout"]
+        if not data or not data.get("ini"):
+            self.toast("No saved layout yet — use “Save current layout” first", "warn", 3.0)
+            return
+        dp = hello_imgui.get_runner_params().docking_params
+        for dw in dp.dockable_windows:
+            if dw.label in data.get("visible", {}):
+                dw.is_visible = data["visible"][dw.label]
+        self._restore_layout_ini = data["ini"]  # applied at the start of the next frame
+        self.layout_sent = None
+        self.toast(f"{fa.ICON_FA_ROTATE_LEFT}  Your layout restored", "info", 2.5)
+
     def pre_new_frame(self) -> None:
         self.process_inbox()
         if self.proc is not None and self.proc.poll() is not None and not self.exiting:
             hello_imgui.get_runner_params().app_shall_exit = True
+        if self._restore_layout_ini is not None:
+            imgui.load_ini_settings_from_memory(self._restore_layout_ini)
+            self._restore_layout_ini = None
         rp = hello_imgui.get_runner_params()
         for v in self.views_to_add:
             dw = hello_imgui.DockableWindow(v.label, "MainDockSpace", v.gui)
