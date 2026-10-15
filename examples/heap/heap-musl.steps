@@ -1,0 +1,7 @@
+# tools/guitest.py steps for heapdemo-musl: the Heap view explains it only shows glibc's heap.
+2   cmd   b heap_snapshot
+3   cmd   run
+5   py    [setattr(d, "is_visible", True) or setattr(d, "focus_window_at_next_frame", True) for d in hello_imgui.get_runner_params().docking_params.dockable_windows if d.label.endswith(" Heap")]
+8   py    assert "musl" in app.heap_pane.error, (app.heap_pane.error, app.heap_pane.data)
+8.5 shot  heap-musl
+9   quit

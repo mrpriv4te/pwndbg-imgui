@@ -153,6 +153,12 @@ pwndbg-imgui --exploit > e.py     # or to another file
 
 ---
 
+### 🧪 Try the features
+
+[`examples/`](examples) has small programs to try each feature in seconds (`make` builds
+them): the [Heap view](examples/heap), [non-x86 targets](examples/multiarch) under qemu, and
+a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
+
 ## 🖼️ Gallery
 
 | Memory view | Command palette |

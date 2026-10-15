@@ -115,6 +115,13 @@ venv with imgui-bundle + numpy, or the pipx env after `pipx inject pwndbg-imgui 
 Read the PNGs back to check visually; assert on `app.state`, `app.is_stopped()`,
 `app.sections[...]`, `app.settings[...]`.
 
+**Feature demos + regression checks:** `examples/` has small C programs (sources only,
+`make` builds them: `cc` natively, `zig cc` for static musl / AArch64 / ARM / MIPS), each
+with a `.steps` file that asserts what the feature should show. `examples/check.sh`
+(`PYTHON=<venv python>`) replays them all and prints pass / fail / skip; run it after
+touching the heap view, the Memory view, payloads or anything architecture-related. A
+new feature gets a demo there.
+
 Useful flags while testing: `--reset-layout`, `--no-viewports`, `--no-io`, `--no-pwndbg`;
 `python -m pwndbg_imgui` works too (`__main__.py`). `--agent-path` prints the agent file
 attached mode loads.
