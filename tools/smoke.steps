@@ -1,0 +1,6 @@
+# smoke test: run from examples/creneau-serre (RUNPATH ./), target ./chall
+3   cmd   b main
+4   cmd   run
+9   py    assert app.is_stopped(), app.state
+9.5 shot  stopped
+11  quit
