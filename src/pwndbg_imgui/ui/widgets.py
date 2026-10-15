@@ -110,9 +110,10 @@ class TableCard:
         self.dl = imgui.get_window_draw_list()
         # a gap between the rows and the scrollbar's grab (the track itself is transparent):
         # more padding, and a wider bar by as much, so the grab is as wide as everywhere else
-        gap = 3.0
+        # (read the style before pushing: scrollbar_padding changes with the first push)
+        gap, size, pad = 3.0, style.scrollbar_size, style.scrollbar_padding
         imgui.push_style_var(imgui.StyleVar_.scrollbar_padding, gap)
-        imgui.push_style_var(imgui.StyleVar_.scrollbar_size, style.scrollbar_size + 2 * (gap - style.scrollbar_padding))
+        imgui.push_style_var(imgui.StyleVar_.scrollbar_size, size + 2 * (gap - pad))
         self.began = imgui.begin_table(self.id, len(self.columns), self.flags, ImVec2(0, 0), self._inner_width())
         imgui.pop_style_var(2)
         if not self.began:
