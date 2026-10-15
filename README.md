@@ -181,9 +181,13 @@ pwndbg-imgui --exploit > e.py     # or to another file
   raw mode (binary-safe). Send as text, hex, or a pwntools-style Python expression
   (`b"A"*40 + p64(0x401136)`, `flat(...)`, `cyclic(100)`), non-printables shown as `\xNN`,
   plus a hexdump view of the output.
-- **🔬 Memory** — region-colored hexdump/qwords (pwndbg legend), bytes changed since the last
-  stop highlighted, in-place editing (type hex digits), follow an expression (`$sp`,
-  `$rdi`…), value inspector.
+- **🔬 Memory** — region-colored hexdump / pointer-sized words (pwndbg legend), bytes changed
+  since the last stop highlighted, in-place editing (type hex digits), follow an expression
+  (`$sp`, `$rdi`…), value inspector.
+- **🧱 Heap** (glibc) — every chunk of the current arena with its size, flags and state
+  (in use, tcache, fastbin, unsorted, small/large bin, top), and the non-empty bins with their
+  chains; addresses open in Memory. Built on pwndbg's heap model, refreshed at each stop
+  (**View → Heap**).
 - **🧰 Tools** — **VMMap**, a **command browser** (built-in help), a **pwndbg config editor**
   (remembered across runs), **live command views** refreshed on every stop (`heap`, `bins`,
   `vis_heap_chunks`, `got`, `telescope`…), a **cyclic pattern tool** (generate, send, find an
@@ -275,7 +279,7 @@ src/pwndbg_imgui/
     ├── app.py        state, gdb process, events, hello_imgui runner
     ├── chrome.py     menus, toolbar/title/status bar, palette, dialogs
     ├── panels.py     tool windows (console, I/O, commands, config…)
-    ├── panes.py      standalone panes (vmmap, breakpoints)
+    ├── panes.py      standalone panes (vmmap, breakpoints, heap)
     ├── sections.py   per-context-section behavior
     ├── views.py      memory, decompiler and command views
     ├── widgets.py    TextView and helpers

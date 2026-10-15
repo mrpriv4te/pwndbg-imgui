@@ -648,6 +648,64 @@ class Agent:
         except gdb.error:
             return int(val.cast(gdb.lookup_type("long"))) & self.mask
 
+    def op_heap(self, limit: int = 4000) -> dict:
+        """The current thread's glibc heap, from pwndbg's own model: every chunk of the
+        arena's heaps (address, size, flags, which bin holds it if free) and the non-empty
+        bins. Returns {"error": ...} when there is nothing to show yet."""
+        self.require_stopped()
+        if self.pwndbg is None:
+            return {"error": "pwndbg is not loaded."}
+        import pwndbg.aglib.heap.glibc as glibc
+
+        try:
+            import pwndbg.libc
+
+            libc = pwndbg.libc.which().value  # "glibc" | "musl" | "unknown"
+        except Exception:  # an older pwndbg: assume glibc, as its heap commands did
+            debug("heap: libc type")
+            libc = "glibc"
+        if libc != "glibc":
+            return {"error": f"The heap view shows glibc's allocator; this program's libc is {libc}."}
+        alloc = glibc.get_allocator()
+        if not alloc.is_initialized():
+            return {"error": "The heap is not initialized yet (the program hasn't called malloc)."}
+        arena = alloc.thread_arena
+        if arena is None:
+            return {"error": "No arena for the current thread."}
+        all_bins = [alloc.tcachebins(None) if alloc.has_tcache() else None,
+                    alloc.fastbins(arena.address), alloc.unsortedbin(arena.address),
+                    alloc.smallbins(arena.address), alloc.largebins(arena.address)]
+        all_bins = [b for b in all_bins if b is not None]
+
+        chunks = []
+        for heap in arena.heaps:
+            for chunk in heap:
+                if len(chunks) >= limit:
+                    break
+                size = chunk.real_size or 0
+                where = None
+                if chunk.is_top_chunk:
+                    where = "top"
+                else:
+                    for bins in all_bins:
+                        if bins.contains_chunk(size, chunk.address):
+                            where = bins.bin_type.value
+                            break
+                chunks.append({"addr": chunk.address, "size": size, "prev_inuse": bool(chunk.prev_inuse),
+                               "mmapped": bool(chunk.is_mmapped), "bin": where})
+                if chunk.is_top_chunk:
+                    break
+
+        bins_out = []
+        for bins in all_bins:
+            for key, b in bins.bins.items():
+                chain = [a for a in b.fd_chain if a]
+                if chain or b.count:
+                    bins_out.append({"type": bins.bin_type.value, "key": key if isinstance(key, str) else int(key),
+                                     "count": b.count, "chain": chain[:16], "corrupted": bool(b.is_corrupted)})
+        return {"arena": arena.address, "main": bool(arena.is_main_arena), "chunks": chunks,
+                "truncated": len(chunks) >= limit, "bins": bins_out}
+
     def op_vmmap(self) -> list:
         self.require_stopped()
         import pwndbg.aglib.vmmap as vmmap

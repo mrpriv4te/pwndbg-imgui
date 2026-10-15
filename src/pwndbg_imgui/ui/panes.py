@@ -196,3 +196,144 @@ class BreakpointsPane:
     def _update(self, num: int, **changes) -> None:
         if self.app.rpc:
             self.app.rpc.request("bp_update", None, self.app.error_toast, num=num, **changes)
+
+
+class HeapPane:
+    """The glibc heap of the current thread's arena: chunks and non-empty bins (agent op
+    `heap`, built on pwndbg's heap model). Refreshed at each stop while visible."""
+
+    LABEL = f"{fa.ICON_FA_CUBES_STACKED} Heap"
+    STATE_NAMES = {"tcachebins": "tcache", "fastbins": "fastbin", "unsortedbin": "unsorted",
+                   "smallbins": "smallbin", "largebins": "largebin", "top": "top"}
+
+    def __init__(self, app: App) -> None:
+        self.app = app
+        self.data: dict | None = None
+        self.error = ""
+        self.fetched_gen = -1  # App.dirty_gen of the data shown
+        self.pending = False
+        self.selected: int | None = None
+
+    def refresh(self) -> None:
+        app = self.app
+        if not app.rpc or not app.is_stopped() or self.pending:
+            return
+        self.pending = True
+        self.fetched_gen = app.dirty_gen
+
+        def done(res) -> None:
+            self.pending = False
+            self.error = res.get("error", "")
+            self.data = None if self.error else res
+
+        def fail(err: str) -> None:
+            self.pending = False
+            self.error = err
+            self.data = None
+
+        app.rpc.request("heap", done, fail)
+
+    def state_color(self, state: str | None):
+        th = self.app.theme
+        if state is None:
+            return th.fg
+        if state == "top":
+            return th.dim
+        return {"tcachebins": th.cyan, "fastbins": th.blue, "unsortedbin": th.magenta}.get(state, th.yellow)
+
+    def gui(self) -> None:
+        app = self.app
+        if app.is_stopped() and self.fetched_gen != app.dirty_gen:
+            self.refresh()  # only while visible: hidden panes aren't drawn
+        if imgui.button(f"{fa.ICON_FA_ARROWS_ROTATE}##heapr"):
+            self.fetched_gen = -1
+            self.refresh()
+        imgui.same_line()
+        if not app.is_stopped():
+            imgui.text_disabled("The heap appears once the program is stopped.")
+            return
+        if self.error:
+            imgui.text_disabled(self.error)
+            return
+        if self.data is None:
+            imgui.text_disabled("Loading…")
+            return
+        d = self.data
+        chunks = d["chunks"]
+        free = sum(1 for c in chunks if c["bin"] not in (None, "top"))
+        imgui.text_disabled(f"{'main_arena' if d['main'] else 'arena'} {d['arena']:#x} · {len(chunks)} chunks"
+                            f" · {free} free" + (" · truncated" if d["truncated"] else ""))
+        avail = imgui.get_content_region_avail()
+        bins_h = min(avail.y * 0.4, imgui.get_text_line_height_with_spacing() * (len(d["bins"]) + 2.5))
+        imgui.push_font(app.mono, app.code_size)
+        self._chunks(chunks, max(60.0, avail.y - bins_h - imgui.get_style().item_spacing.y))
+        self._bins(d["bins"], {c["addr"] for c in chunks})
+        imgui.pop_font()
+
+    def _chunks(self, chunks: list, height: float) -> None:
+        app = self.app
+        if not imgui.begin_table("##heapchunks", 4, TABLE_FLAGS, imgui.ImVec2(0, height)):
+            return
+        imgui.table_setup_scroll_freeze(0, 1)
+        for col in ("Chunk", "Size", "Flags"):
+            imgui.table_setup_column(col)
+        imgui.table_setup_column("State", imgui.TableColumnFlags_.width_stretch)
+        imgui.table_headers_row()
+        for c in chunks:
+            addr, state = c["addr"], c["bin"]
+            imgui.table_next_row()
+            imgui.table_next_column()
+            imgui.push_style_color(imgui.Col_.text, v4(self.state_color(state)))
+            clicked, _ = imgui.selectable(f"{addr:#x}##hc{addr}", self.selected == addr,
+                                          imgui.SelectableFlags_.span_all_columns
+                                          | imgui.SelectableFlags_.allow_double_click)
+            if clicked:
+                self.selected = addr
+                if imgui.is_mouse_double_clicked(0):
+                    app.open_memory(addr)
+            imgui.set_item_tooltip("Double-click: open in Memory")
+            imgui.table_next_column()
+            imgui.text_unformatted(f"{c['size']:#x}")
+            imgui.table_next_column()
+            imgui.text_unformatted(("P" if c["prev_inuse"] else "-") + ("M" if c["mmapped"] else "-"))
+            imgui.table_next_column()
+            imgui.text_unformatted(self.STATE_NAMES.get(state, "") if state else "in use")
+            imgui.pop_style_color()
+        imgui.end_table()
+
+    def _bins(self, bins: list, chunk_addrs: set) -> None:
+        app = self.app
+        if not bins:
+            imgui.text_disabled("All bins are empty.")
+            return
+        if not imgui.begin_table("##heapbins", 3, TABLE_FLAGS):
+            return
+        for col in ("Bin", "Count"):
+            imgui.table_setup_column(col)
+        imgui.table_setup_column("Chain (fd)", imgui.TableColumnFlags_.width_stretch)
+        imgui.table_headers_row()
+        for i, b in enumerate(bins):
+            imgui.table_next_row()
+            imgui.table_next_column()
+            key = b["key"] if isinstance(b["key"], str) else f"{b['key']:#x}"
+            imgui.text_colored(v4(self.state_color(b["type"])), f"{self.STATE_NAMES[b['type']]} {key}")
+            if b["corrupted"]:
+                imgui.same_line()
+                imgui.text_colored(v4(app.theme.red), "corrupted")
+            imgui.table_next_column()
+            imgui.text_unformatted("" if b["count"] is None else str(b["count"]))
+            imgui.table_next_column()
+            for j, a in enumerate(b["chain"]):
+                if j:
+                    imgui.same_line(0, 4)
+                    imgui.text_disabled("→")
+                    imgui.same_line(0, 4)
+                # tcache entries point at the chunk's user data (chunk + 2 words)
+                chunk = a if a in chunk_addrs else a - 2 * app.ptrsize
+                if chunk in chunk_addrs:
+                    if imgui.text_link(f"{a:#x}##hb{i}_{j}"):
+                        self.selected = chunk
+                        app.open_memory(a)
+                else:
+                    imgui.text_disabled(f"{a:#x}")  # e.g. the bin's head inside the arena
+        imgui.end_table()

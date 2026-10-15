@@ -24,7 +24,7 @@ from .appearance import AppearanceMixin
 from .chrome import ChromeMixin
 from .native import NativeWindow
 from .panels import PanelsMixin
-from .panes import BreakpointsPane, VmmapPane
+from .panes import BreakpointsPane, HeapPane, VmmapPane
 from .sections import SectionsMixin
 from .views import CmdView, DecompView, MemoryView
 from .widgets import TextView, ansi_inline, v4
@@ -113,6 +113,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.decomp = DecompView(self)
         self.vmmap_pane = VmmapPane(self)
         self.breakpoints_pane = BreakpointsPane(self)
+        self.heap_pane = HeapPane(self)
         self.cmd_views: list[CmdView] = []
         self.views_to_add: list[CmdView] = []
 

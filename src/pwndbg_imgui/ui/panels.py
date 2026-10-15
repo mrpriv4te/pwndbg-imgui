@@ -10,7 +10,7 @@ from imgui_bundle import icons_fontawesome_6 as fa
 from ..payload import cyclic, cyclic_find, eval_payload, hexdump_ansi, parse_bytes_input
 from ..term import ECHO, strip_ansi
 from ..theme import THEMES
-from .panes import BreakpointsPane, VmmapPane
+from .panes import BreakpointsPane, HeapPane, VmmapPane
 from .views import DecompView
 from .widgets import buttons_width, combo_width, help_marker, v4
 
@@ -569,6 +569,7 @@ class PanelsMixin:
             (f"{fa.ICON_FA_DRAGON} {DecompView.LABEL}", self.decomp.gui, "MainDockSpace", True),
             (VmmapPane.LABEL, self.vmmap_pane.gui, "RightBottom", True),
             (BreakpointsPane.LABEL, self.breakpoints_pane.gui, "RightBottom", True),
+            (HeapPane.LABEL, self.heap_pane.gui, "MainDockSpace", False),
             (f"{fa.ICON_FA_BOOK} Commands", self.commands_gui, "MainDockSpace", False),
             (f"{fa.ICON_FA_SLIDERS} pwndbg Config", self.config_gui, "MainDockSpace", False),
             (f"{fa.ICON_FA_HASHTAG} Pattern (cyclic)", self.cyclic_gui, "RightBottom", False),
