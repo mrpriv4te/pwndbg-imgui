@@ -12,11 +12,14 @@ STEPS_FILE has one step per line, `<seconds-since-start> <kind> <arg>`:
     3   cmd   run
     6   py    assert app.state.get("alive"), app.state
     6.5 shot  stopped           # save DIR/stopped.png
+    7   shot  heap  Heap        # only the docked window whose label ends with "Heap"
     8   quit
 
 Kinds: `cmd` (console command), `py` (exec'd with `app`, `imgui`, `hello_imgui` in
 scope; an exception fails the run), `shot` (screenshot), `quit`. Blank lines and
-`#` comments are ignored. A final screenshot `final.png` is always written.
+`#` comments are ignored. A final screenshot `final.png` is always written. A `shot`
+with a window name after the file name is cropped to that window (with its tab bar),
+e.g. for release notes.
 
 Needs an interpreter with pwndbg_imgui importable plus numpy, e.g. the pipx env
 after `pipx inject pwndbg-imgui numpy`. Config goes to a fresh temporary
@@ -113,11 +116,28 @@ def main(argv: list[str]) -> int:
     App = app_mod.App
     run = {"t0": None, "i": 0, "shots": [], "failed": False}
 
-    def screenshot(name: str, arr=None) -> None:
+    def screenshot(name: str, arr=None, rect=None) -> None:
         if arr is None:
             arr = front_buffer()
+        if rect is not None:
+            x0, y0, x1, y1 = rect
+            arr = arr[max(0, y0):y1, max(0, x0):x1].copy()
         write_png(os.path.join(out, name + ".png"), arr)
         print(f"guitest: saved {os.path.join(out, name + '.png')}")
+
+    def window_rect(suffix: str):
+        """Framebuffer pixel rect of the dockable window whose label ends with suffix."""
+        labels = [d.label for d in hello_imgui.get_runner_params().docking_params.dockable_windows
+                  if d.label.endswith(suffix)]
+        win = imgui.internal.find_window_by_name(labels[0]) if labels else None
+        if win is None:
+            raise SystemExit(f"guitest: no window ending with {suffix!r} to crop a shot to")
+        node = win.dock_node  # docked: crop to the dock node, which includes its tab bar
+        pos, size = (node.pos, node.size) if node is not None else (win.pos, win.size)
+        vp = imgui.get_main_viewport().pos
+        scale = imgui.get_io().display_framebuffer_scale
+        return (int((pos.x - vp.x) * scale.x), int((pos.y - vp.y) * scale.y),
+                int((pos.x - vp.x + size.x) * scale.x), int((pos.y - vp.y + size.y) * scale.y))
 
     def drive(self) -> None:
         now = time.monotonic()
@@ -136,7 +156,8 @@ def main(argv: list[str]) -> int:
                     print(f"guitest: step at {t}s failed: {arg}", file=sys.stderr)
                     traceback.print_exc()
             elif kind == "shot":
-                run["shots"].append(arg or f"shot{run['i']}")
+                name, _, window = arg.partition(" ")
+                run["shots"].append((name or f"shot{run['i']}", window_rect(window.strip()) if window.strip() else None))
             elif kind == "quit":
                 hello_imgui.get_runner_params().app_shall_exit = True
 
@@ -155,7 +176,8 @@ def main(argv: list[str]) -> int:
 
         def after_swap() -> None:
             while run["shots"]:
-                screenshot(run["shots"].pop(0))
+                name, rect = run["shots"].pop(0)
+                screenshot(name, rect=rect)
 
         rp.callbacks.pre_new_frame = pre_new_frame
         rp.callbacks.after_swap = after_swap

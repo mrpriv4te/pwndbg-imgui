@@ -91,8 +91,12 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
-          tools/release-notes.sh "$TAG" > notes.md
           flags=""
           case "${TAG#v}" in *[a-z]*) flags="--prerelease" ;; esac  # e.g. v1.4.0rc1
+          if [ -z "$flags" ] && [ ! -f "docs/releases/$TAG.md" ]; then
+            echo "::error::docs/releases/$TAG.md is missing: a release needs hand-written notes (see CLAUDE.md)"
+            exit 1
+          fi
+          tools/release-notes.sh "$TAG" > notes.md
           gh release create "$TAG" dist/* --verify-tag --title "pwndbg-imgui ${TAG#v}" \
             --notes-file notes.md $flags

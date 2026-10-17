@@ -201,14 +201,26 @@ with their own context menu add `card.copy_menu(row)` to it.
 ## Release checklist
 
 1. Lint clean and `pytest` green (commands above); CI green on `main`.
-2. `tools/guitest.py` smoke run passes; look at the screenshots.
-3. Commit (only when asked), then `git tag -a vX.Y.Z -m "pwndbg-imgui X.Y.Z"` and push the
+2. `tools/guitest.py` smoke run passes; look at the screenshots. Retake the README
+   screenshots (`docs/screenshots/`) when the UI they show changed.
+3. Write the release notes, pwndbg-style (see e.g. pwndbg's 2026.09.15 release):
+   `docs/releases/vX.Y.Z.md` = a bold one-paragraph summary, one `###` section per
+   user-visible feature (what it does, how to reach it, a screenshot), then `### Others`
+   (fixes, compatibility notes). Screenshots go in `docs/releases/vX.Y.Z/` and are linked
+   relatively (`![…](vX.Y.Z/name.png)`); take them with guitest's cropped shots
+   (`shot NAME WINDOW` saves only that docked window). Don't repeat the install line or
+   the commit list: `tools/release-notes.sh` appends both.
+4. Commit (only when asked), then `git tag -a vX.Y.Z -m "pwndbg-imgui X.Y.Z"` and push the
    branch **and** the tag.
-4. The tag's CI run publishes the GitHub Release automatically (`release` job: notes from
-   `tools/release-notes.sh` = commit subjects since the previous tag, wheel + sdist
-   attached; a tag with letters, e.g. `v1.4.0rc1`, becomes a prerelease). So commit
-   subjects are the changelog — keep them meaningful. Not published to PyPI (yet).
-   Check it with `gh run watch` / `gh release view vX.Y.Z`.
+5. The tag's CI run publishes the GitHub Release automatically (`release` job: notes from
+   `tools/release-notes.sh` = the hand-written notes with image links pinned to the tag,
+   the install line, the commit subjects since the previous tag; wheel + sdist attached).
+   It **fails** without `docs/releases/vX.Y.Z.md`, except for a prerelease (a tag with
+   letters, e.g. `v1.4.0rc1`, which gets the commit list only). Commit subjects still
+   form the "All changes" list — keep them meaningful. Not published to PyPI (yet).
+   Check it with `gh run watch` / `gh release view vX.Y.Z`. To fix the notes of a
+   published release: `RELEASE_REF=<commit with the files> tools/release-notes.sh vX.Y.Z
+   > notes.md && gh release edit vX.Y.Z --notes-file notes.md`.
 
 ## Conventions
 
