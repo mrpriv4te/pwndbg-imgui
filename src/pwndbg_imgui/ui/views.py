@@ -10,7 +10,7 @@ import time
 from imgui_bundle import ImVec2, imgui
 from imgui_bundle import icons_fontawesome_6 as fa
 
-from ..term import Term
+from ..term import Term, strip_ansi
 from ..theme import u32
 from .catalog import arg_regs
 from .widgets import TextView, ansi_inline, combo_width, v4
@@ -258,6 +258,147 @@ class DecompView:
         self.view.render()
         if self.stale and app.is_stopped():
             self.fetch()
+
+
+class DisasmTarget:
+    """The Disassembly window when it isn't following $pc: the whole function holding a
+    chosen address (`nearpc -f`), or, where no function boundaries are known, `nearpc`
+    from that address, extended as you scroll past the end like the stack."""
+
+    STEP = 64  # instructions per chunk
+    MAX = 4096
+
+    def __init__(self, app) -> None:
+        self.app = app
+        self.term = Term(max_lines=50000)
+        self.view = TextView(app, self.term, "disasmt", follow="pc", empty_hint=self.hint)
+        self.view.on_scroll_end = self.more
+        self.follow_pc = True
+        self.target = ""  # what the user typed
+        self.addr: int | None = None  # where it resolved
+        self.func = True  # whole function; False: linear from the address
+        self.count = self.STEP  # instructions asked for (linear)
+        self.end = False  # nearpc returned fewer: undecodable bytes follow
+        self.title = ""
+        self.error = ""
+        self.busy = False
+        self.ran_gen = -1
+        self.more_t = 0.0
+
+    def hint(self) -> str:
+        return self.error or "Type a function or an address, then Go."
+
+    def ready(self) -> bool:
+        app = self.app
+        return bool(app.rpc) and app.connected() and not app.state.get("running")
+
+    def go(self) -> None:
+        """Resolve the typed target once, so `$pc+0x20` stays put across stops."""
+        target = self.target.strip()
+        if not target or not self.ready():
+            return
+        self.follow_pc = False
+        self.busy = True
+
+        def done(addr: int) -> None:
+            self.busy = False
+            self.addr, self.func, self.count, self.end = addr, True, self.STEP, False
+            self.title = f"{addr:#x}" if target.lower() == f"{addr:#x}" else f"{target}  {addr:#x}"
+            self.view.pending_scroll = 0
+            self.fetch()
+
+        def fail(err):
+            self.busy = False
+            self.addr, self.title = None, ""  # forget the previous target: a stop mustn't bring it back
+            self.term.clear()
+            self.error = f"Cannot evaluate {target!r}: {err}"
+
+        self.app.rpc.request("eval", done, fail, expr=target)
+
+    def fetch(self, keep_scroll: bool = False) -> None:
+        if self.addr is None or self.busy or not self.ready():
+            return
+        app = self.app
+        self.busy = True
+        self.ran_gen = app.dirty_gen
+
+        def done(out, func=self.func):
+            self.busy = False
+            self.error = ""
+            text = strip_ansi(out or "")
+            shown = sum(1 for ln in text.split("\n") if DISASM_ADDR_RE.match(ln))
+            if func and not shown:  # "function boundaries of … could not be found"
+                self.func = False
+                self.fetch(keep_scroll)
+                return
+            if not shown and text.strip():
+                self.term.clear()
+                self.error = text.strip()
+                return
+            self.view.keep_scroll_once = keep_scroll
+            self.term.set_text(out or "")
+            self.end = not func and shown < self.count
+            name = re.search(r"<([^>+]+)", text) if func else None  # the function's name, from its first line
+            if name and not self.title.startswith(name.group(1)):
+                self.title = f"{name.group(1)}  ·  {self.title}"
+
+        def fail(err, func=self.func):
+            self.busy = False
+            if func:  # an older pwndbg without `nearpc -f`
+                self.func = False
+                self.fetch(keep_scroll)
+                return
+            self.term.clear()
+            self.error = f"Disassembly failed: {err}"
+
+        # -n: no branch arrows; -r 0: start at the address itself
+        n = "" if app.settings["disasm_branches"] else "-n "
+        cmd = f"nearpc {n}-f {self.addr:#x}" if self.func else f"nearpc {n}-r 0 {self.addr:#x} {self.count}"
+        app.rpc.request("exec", done, fail, cmd=cmd)
+
+    def more(self) -> None:
+        """Scrolled past the end: show the next chunk."""
+        now = time.monotonic()
+        if self.addr is None or self.func or self.end or self.count >= self.MAX or self.busy or now - self.more_t < 0.4:
+            return
+        self.more_t = now
+        self.count = min(self.MAX, self.count + self.STEP)
+        self.fetch(keep_scroll=True)
+
+    def bar(self) -> None:
+        """Follow PC + target box, above the Disassembly window."""
+        changed, self.follow_pc = imgui.checkbox("Follow PC##dis", self.follow_pc)
+        if changed and not self.follow_pc and self.addr is None:
+            self.go()
+        imgui.same_line()
+        st = self.app.settings
+        imgui.begin_disabled(self.follow_pc)
+        changed, st["disasm_branches"] = imgui.checkbox("Branches##disbr", st["disasm_branches"])
+        imgui.end_disabled()
+        imgui.set_item_tooltip("Draw branch arrows (nearpc without -n). Only for a chosen function or address:\n"
+                               "the Follow PC view follows pwndbg's own settings.")
+        if changed:
+            self.fetch(keep_scroll=True)
+        imgui.same_line()
+        imgui.set_next_item_width(max(80.0, imgui.get_content_region_avail().x - imgui.calc_text_size("Go").x - 24))
+        entered, self.target = imgui.input_text_with_hint(
+            "##distarget", "function / address to disassemble (main, 0x401156)", self.target,
+            imgui.InputTextFlags_.enter_returns_true)
+        imgui.same_line()
+        imgui.begin_disabled(not self.target.strip())
+        if imgui.button("Go##disgo") or (entered and self.target.strip()):
+            self.go()
+        imgui.end_disabled()
+        if not self.follow_pc and self.title and not self.error:
+            end = ("" if self.func else "   · linear, no function boundaries") + (
+                ": stops where the next bytes don't decode" if self.end else "")
+            imgui.text_disabled(f"{fa.ICON_FA_CODE}  {self.title}   (not following $pc){end}")
+
+    def gui(self) -> None:
+        """The chosen disassembly; re-run after each stop so the ► and breakpoints stay current."""
+        if self.ran_gen != self.app.dirty_gen and self.app.is_stopped():
+            self.fetch(keep_scroll=True)
+        self.view.render()
 
 
 class MemoryView:

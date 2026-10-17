@@ -477,7 +477,7 @@ class ChromeMixin:
             return [], run  # several plain words: a command, not a location
         goto = [
             (f"{fa.ICON_FA_MEMORY}  Memory at  {q}", "go to", lambda: self.goto_memory(q)),
-            (f"{fa.ICON_FA_CODE}  Disassemble at  {q}", "go to", lambda: self.open_cmd_view(f"nearpc {q} 40")),
+            (f"{fa.ICON_FA_CODE}  Disassemble at  {q}", "go to", lambda: self.disassemble(q)),
             (f"{fa.ICON_FA_LAYER_GROUP}  Telescope  {q}", "go to", lambda: self.open_cmd_view(f"telescope {q} 32")),
         ]
         return goto, run

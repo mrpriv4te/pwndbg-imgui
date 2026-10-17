@@ -55,6 +55,10 @@ curl --proto '=https' --tlsv1.2 -LsSf 'https://install.pwndbg.re' | sh -s -- -t 
 > command, or a known path like `~/.local/share/pwndbg`). Override with `--gdb PATH`,
 > `--pwndbg PATH`, or `--init-cmd CMD`.
 
+Use **pwndbg 2026.09.15 or newer**. Older releases work, but their `nearpc -f` can't find
+function boundaries, so *Disassemble* shows the instructions from the address on instead of
+the whole function.
+
 Quick check (any one of these should print a `Pwndbg: 2026.xx.xx …` line):
 
 ```bash
@@ -173,7 +177,9 @@ a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
 - **🧩 pwndbg context** — Registers, Disassembly, Source, Stack, Backtrace, Arguments, Watch,
   Threads, Heap Tracker, Last Signal. Each section fits its window (disasm/stack/source/
   backtrace show exactly as many lines as are visible) and only the shown sections are
-  computed.
+  computed. Untick *Follow PC* in Disassembly (or use *Disassemble* on any address) to
+  read a whole function (`nearpc -f`, pwndbg ≥ 2026.09.15), or, where no function is
+  known, the instructions from that address on, loading more as you scroll.
 - **🖱️ Clickable addresses everywhere** — hover = memory region + pwndbg deref chain;
   <kbd>Ctrl</kbd>+click = open in the memory view; right-click = telescope, disassemble,
   xinfo, find pointers, breakpoint, watchpoint…

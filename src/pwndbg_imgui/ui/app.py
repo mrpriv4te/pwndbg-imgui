@@ -29,7 +29,7 @@ from .panels import PanelsMixin
 from .tool_panes import CommandsPane, ConfigPane, CyclicPane
 from .panes import BacktracePane, BreakpointsPane, HeapPane, RegistersBar, ThreadsPane, VmmapPane
 from .sections import SectionsMixin
-from .views import CmdView, DecompView, MemoryView
+from .views import CmdView, DecompView, DisasmTarget, MemoryView
 from .widgets import TableCard, TextView, ansi_inline, v4
 
 
@@ -108,6 +108,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
             term = Term(max_lines=5000)
             view = TextView(self, term, name, follow=follow, empty_hint=functools.partial(self._section_hint, name))
             self.sections[name] = {"term": term, "view": view, "label": f"{getattr(fa, 'ICON_FA_' + icon)} {label}"}
+        self.disasm_target = DisasmTarget(self)
         self._setup_section_hooks()
         self.console_view = TextView(self, self.console_term, "console", follow="bottom")
         self.io_view = TextView(self, self.io_term, "io", follow="bottom",
@@ -313,7 +314,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         if imgui.menu_item_simple(fa.ICON_FA_LAYER_GROUP + "  Telescope"):
             self.open_cmd_view(f"telescope {addr:#x} 32")
         if imgui.menu_item_simple(fa.ICON_FA_CODE + "  Disassemble"):
-            self.open_cmd_view(f"nearpc {addr:#x} 30")
+            self.disassemble(f"{addr:#x}")
         if imgui.menu_item_simple(fa.ICON_FA_CIRCLE_INFO + "  xinfo"):
             self.open_cmd_view(f"xinfo {addr:#x}")
         if imgui.menu_item_simple(fa.ICON_FA_MAGNIFYING_GLASS + "  Find pointers to it"):
@@ -337,6 +338,12 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         if dw is not None:
             dw.is_visible = True
             dw.focus_window_at_next_frame = True
+
+    def disassemble(self, target: str) -> None:
+        """Show a function / address in the Disassembly window (stops following $pc)."""
+        self.disasm_target.target = target
+        self.disasm_target.go()
+        self.focus_window(self.sections["disasm"]["label"])
 
     def open_cmd_view(self, cmd: str, auto: bool = True, title: str | None = None, restored: bool = False) -> None:
         for v in self.cmd_views:

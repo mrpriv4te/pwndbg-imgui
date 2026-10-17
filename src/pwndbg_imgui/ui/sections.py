@@ -22,6 +22,8 @@ class SectionsMixin:
         dis.gutter = self._disasm_gutter
         dis.gutter_click = lambda i, t: self._toggle_disasm_bp(t)
         dis.menu = self._disasm_menu
+        pick = self.disasm_target.view
+        pick.gutter, pick.gutter_click, pick.menu = dis.gutter, dis.gutter_click, dis.menu
         code = self.sections["code"]["view"]
         code.gutter = self._code_gutter
         code.gutter_click = lambda i, t: self._toggle_code_bp(t)

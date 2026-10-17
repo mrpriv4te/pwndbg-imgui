@@ -306,7 +306,7 @@ class TextView:
         self.rows = 0
         self.cols = 0
         self.wrap_cols = 0
-        self.on_scroll_end = None  # called when the user scrolls past the bottom
+        self.on_scroll_end: Callable[[], None] | None = None  # called when the user scrolls past the bottom
         self.keep_scroll_once = False
         self.lockable = False  # show a lock toggle that freezes the scroll position
         self.locked = False

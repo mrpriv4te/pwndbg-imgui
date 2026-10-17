@@ -30,6 +30,11 @@ class PanelsMixin:
                     return
             if name == "regs":
                 self.registers_bar.gui()
+            elif name == "disasm":
+                self.disasm_target.bar()
+                if not self.disasm_target.follow_pc:
+                    self.disasm_target.gui()
+                    return
             if name == "expressions":
                 self._watch_bar()
             elif name == "heap_tracker":

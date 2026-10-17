@@ -567,7 +567,7 @@ class BacktracePane(StopRefreshed):
             app.exec(f"frame {level - 1}", refresh=False, quiet=True, cb=lambda _o: app.send_console("finish"))
         imgui.separator()
         if imgui.menu_item_simple(f"{fa.ICON_FA_CODE}  Disassemble at {pc:#x}"):
-            app.open_cmd_view(f"nearpc {pc:#x} 40")
+            app.disassemble(f"{pc:#x}")
         if imgui.menu_item_simple(f"{fa.ICON_FA_MEMORY}  Memory at {pc:#x}"):
             app.open_memory(pc)
         imgui.separator()

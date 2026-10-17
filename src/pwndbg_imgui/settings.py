@@ -59,6 +59,7 @@ class Settings:
         # are a starting point (registers in compact columns, flags shown)
         "pwndbg_config": {"show-compact-regs": "hardcut", "show-compact-regs-columns": "3", "show-flags": "on"},
         "decomp_autoconnect": True,
+        "disasm_branches": False,  # branch arrows in the chosen disassembly (nearpc without -n)
         "autofit": True,
         "io_raw": True,
         "io_echo": True,
