@@ -191,8 +191,8 @@ a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
   connect/sync.
 - **🔴 Breakpoints** — click the Disassembly/Source gutter, a dedicated window (enable,
   conditions, hit counts, watchpoints), offered for restore per binary.
-- **💻 gdb console** — colors, persistent history, <kbd>Tab</kbd> completion (via gdb),
-  empty Enter repeats the last command, <kbd>Ctrl</kbd>+<kbd>C</kbd> interrupts.
+- **💻 gdb console** — colors, persistent history, <kbd>Tab</kbd> completion (via gdb; pick a
+  match with <kbd>↑</kbd>/<kbd>↓</kbd> or <kbd>Tab</kbd>, <kbd>Enter</kbd> inserts it), empty Enter repeats the last command, <kbd>Ctrl</kbd>+<kbd>C</kbd> interrupts.
 - **⌨️ Program I/O** — the program gets its own terminal (stdin/stdout separate from gdb),
   raw mode (binary-safe). Send as text, hex, or a pwntools-style Python expression
   (`b"A"*40 + p64(0x401136)`, `flat(...)`, `cyclic(100)`), non-printables shown as `\xNN`,

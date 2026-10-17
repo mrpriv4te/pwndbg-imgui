@@ -59,3 +59,19 @@ def test_imgui_bindings_used_by_the_detached_view_drag():
         assert hasattr(imgui.Viewport, name), name
     for fn in (imgui.find_viewport_by_id, imgui.internal.clear_active_id, imgui.internal.clear_drag_drop):
         assert callable(fn)
+
+
+def test_console_completion_selection_wraps():
+    from pwndbg_imgui.ui.console_panes import ConsolePane
+
+    pane = ConsolePane.__new__(ConsolePane)  # move_selection() needs no app or widgets
+    pane.completions, pane.comp_sel = ["info record", "info registers", "info reverse"], -1
+    pane.move_selection(1)
+    assert pane.comp_sel == 0  # Down / Tab: the first match
+    pane.move_selection(-1)
+    assert pane.comp_sel == 2  # wraps to the last
+    pane.comp_sel = -1
+    pane.move_selection(-1)
+    assert pane.comp_sel == 2  # Up first: the last match
+    pane.move_selection(1)
+    assert pane.comp_sel == 0

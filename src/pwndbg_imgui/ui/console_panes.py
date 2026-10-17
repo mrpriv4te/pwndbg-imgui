@@ -20,8 +20,11 @@ if TYPE_CHECKING:
 
 
 class ConsolePane:
-    """The gdb console's input line: history (Up/Down), completion (Tab, through gdb),
-    Ctrl+C / Ctrl+L / Ctrl+D, and a debug trace of what Enter did (--debug)."""
+    """The gdb console's input line: history (Up/Down), completion (Tab, through gdb; with
+    several matches, Up/Down/Tab pick one and Enter inserts it), Ctrl+C / Ctrl+L / Ctrl+D,
+    and a debug trace of what Enter did (--debug)."""
+
+    SHOWN = 12  # completion matches listed at once
 
     LABEL = f"{fa.ICON_FA_TERMINAL} Console"
 
@@ -32,6 +35,8 @@ class ConsolePane:
         self.history_pos = -1
         self.replace: str | None = None  # text to put in the input box at the next frame
         self.completions: list[str] = []
+        self.comp_sel = -1  # highlighted match, -1: none yet
+        self.keep_completions = False  # our own edit of the input (the common prefix): keep the list
         self.focus_next = True
 
     def prefill(self, text: str) -> None:
@@ -47,14 +52,7 @@ class ConsolePane:
         if app.console is not None:
             app.console.resize(app.console_view.rows, app.console_view.cols)
         if self.completions:
-            n = min(len(self.completions), 12)
-            imgui.set_next_window_pos(imgui.get_cursor_screen_pos(), imgui.Cond_.always, ImVec2(0, 1))
-            if imgui.begin_tooltip():
-                for c in self.completions[:n]:
-                    imgui.text_unformatted(c)
-                if len(self.completions) > n:
-                    imgui.text_disabled(f"… {len(self.completions) - n} more")
-                imgui.end_tooltip()
+            self._completion_list()
         running = app.is_running()
         icon = fa.ICON_FA_PERSON_RUNNING if running else fa.ICON_FA_ANGLES_RIGHT
         imgui.align_text_to_frame_padding()  # center the icon on the input box's line
@@ -75,9 +73,20 @@ class ConsolePane:
             hint = "gdb is busy — commands are queued"
         else:
             hint = "gdb / pwndbg command  (Tab: complete, ↑↓: history)"
+        # Esc closes the match list; ImGui's input would also revert the text to what it was
+        # when focused (often empty), so keep what was typed
+        closing = bool(self.completions) and imgui.is_key_pressed(imgui.Key.escape, False)
+        if self.completions and imgui.get_io().key_shift and imgui.is_key_pressed(imgui.Key.tab):
+            self.move_selection(-1)  # ImGui only calls the completion callback for a plain Tab
+        typed = self.input
         imgui.push_font(app.mono, app.ui_size)  # an input box: sized like the UI, not the code panes
         entered, self.input = imgui.input_text_with_hint("##console_in", hint, self.input, flags, self._callback)
         imgui.pop_font()
+        if closing:
+            self.completions = []
+            if self.input != typed:
+                self.input = self.replace = typed
+            self.focus_next = True
         if (not entered and self.input.strip() and debug_enabled()
                 and (imgui.is_key_pressed(imgui.Key.enter, False) or imgui.is_key_pressed(imgui.Key.keypad_enter, False))):
             debug(f"console: Enter pressed but the command was not submitted ({self._focus_report()})")
@@ -90,8 +99,15 @@ class ConsolePane:
             elif io.key_ctrl and imgui.is_key_pressed(imgui.Key.d, False) and not self.input:
                 app.send_console("")
         if imgui.is_item_edited():
+            if self.keep_completions:
+                self.keep_completions = False
+            else:
+                self.completions = []
+        if entered and self.completions and self.comp_sel >= 0:  # Enter picks the highlighted match
+            self.replace = self.completions[self.comp_sel] + " "
             self.completions = []
-        if entered:
+            imgui.set_keyboard_focus_here(-1)
+        elif entered:
             cmd = self.input
             debug(f"console: submit {cmd!r} (attached={app.attached} running={running} "
                   f"gdb_idle={app.gdb_idle} connected={app.connected()})")
@@ -107,6 +123,31 @@ class ConsolePane:
             self.input = ""
             app.console_view.at_bottom = True
             imgui.set_keyboard_focus_here(-1)
+
+    def _completion_list(self) -> None:
+        """The matches above the input box, scrolled so the highlighted one shows."""
+        comps, sel = self.completions, self.comp_sel
+        first = 0 if len(comps) <= self.SHOWN else max(0, min(sel - self.SHOWN // 2, len(comps) - self.SHOWN))
+        imgui.set_next_window_pos(imgui.get_cursor_screen_pos(), imgui.Cond_.always, ImVec2(0, 1))
+        if not imgui.begin_tooltip():
+            return
+        if first:
+            imgui.text_disabled(f"… {first} more")
+        for i in range(first, min(len(comps), first + self.SHOWN)):
+            imgui.selectable(f"{comps[i]}##comp{i}", i == sel)
+        if len(comps) > first + self.SHOWN:
+            imgui.text_disabled(f"… {len(comps) - first - self.SHOWN} more")
+        imgui.separator()
+        imgui.text_disabled("↑↓ / Tab: choose   Enter: insert   Esc: close")
+        imgui.end_tooltip()
+
+    def move_selection(self, step: int) -> None:
+        n = len(self.completions)
+        if n:
+            if self.comp_sel < 0:  # first move: Down / Tab to the first match, Up to the last
+                self.comp_sel = 0 if step > 0 else n - 1
+            else:
+                self.comp_sel = (self.comp_sel + step) % n
 
     def _focus_report(self) -> str:
         """Who has the keyboard right now, for --debug logs of input problems."""
@@ -131,6 +172,12 @@ class ConsolePane:
                 data.delete_chars(0, data.buf_text_len)
                 data.insert_chars(0, self.replace)
                 self.replace = None
+            return 0
+        if data.event_flag == F.callback_history and self.completions:  # walk the matches, not the history
+            self.move_selection(-1 if data.event_key == imgui.Key.up_arrow else 1)
+            return 0
+        if data.event_flag == F.callback_completion and self.completions:
+            self.move_selection(1)
             return 0
         if data.event_flag == F.callback_history:
             if not self.history:
@@ -159,7 +206,9 @@ class ConsolePane:
                 else:
                     if len(prefix) > len(text):
                         self.replace = prefix
+                        self.keep_completions = True
                     self.completions = lines
+                    self.comp_sel = -1
 
             app.rpc.request("complete", done, None, text=text)
         return 0
