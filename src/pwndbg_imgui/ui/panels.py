@@ -30,6 +30,19 @@ class PanelsMixin:
                     return
             if name == "regs":
                 self.registers_bar.gui()
+            elif name == "stack" and self.pwndbg_has("stack-vis", unknown=False):  # pwndbg >= 2026.09.15
+                if not imgui.begin_tab_bar("##stacktabs"):
+                    return
+                if imgui.begin_tab_item(f"{fa.ICON_FA_LAYER_GROUP} Stack##stackc")[0]:
+                    sec["view"].render()
+                    imgui.end_tab_item()
+                frames_flags = imgui.TabItemFlags_.set_selected if self.stack_vis.select else 0
+                self.stack_vis.select = False
+                if imgui.begin_tab_item(f"{fa.ICON_FA_BARS_STAGGERED} Frames (stack-vis)##stackv", None, frames_flags)[0]:
+                    self.stack_vis.gui()
+                    imgui.end_tab_item()
+                imgui.end_tab_bar()
+                return
             elif name == "disasm":
                 self.disasm_target.bar()
                 if not self.disasm_target.follow_pc:

@@ -27,7 +27,7 @@ from .native import NativeWindow, capsule_pointer
 from .console_panes import ConsolePane, ProgramIOPane
 from .panels import PanelsMixin
 from .tool_panes import CommandsPane, ConfigPane, CyclicPane
-from .panes import BacktracePane, BreakpointsPane, HeapPane, RegistersBar, ThreadsPane, VmmapPane
+from .panes import BacktracePane, BreakpointsPane, HeapPane, RegistersBar, StackVisPane, ThreadsPane, VmmapPane
 from .sections import SectionsMixin
 from .views import CmdView, DecompView, DisasmTarget, MemoryView
 from .widgets import TableCard, TextView, ansi_inline, v4
@@ -119,6 +119,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.vmmap_pane = VmmapPane(self)
         self.breakpoints_pane = BreakpointsPane(self)
         self.heap_pane = HeapPane(self)
+        self.stack_vis = StackVisPane(self)
         self.keys_card: TableCard | None = None
         self.backtrace_pane = BacktracePane(self)
         self.threads_pane = ThreadsPane(self)
@@ -356,9 +357,12 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.cmd_views.append(view)
         self.views_to_add.append(view)
 
-    def pwndbg_has(self, name: str | None) -> bool:
-        if name is None or self.commands is None:
+    def pwndbg_has(self, name: str | None, unknown: bool = True) -> bool:
+        """Whether pwndbg has this command; `unknown` until the command list has arrived."""
+        if name is None:
             return True
+        if self.commands is None:
+            return unknown
         return any(c["name"] == name or name in c["aliases"] for c in self.commands)
 
     def process_inbox(self) -> None:

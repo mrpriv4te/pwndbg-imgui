@@ -435,6 +435,63 @@ class HeapPane:
         card.end()
 
 
+class StackVisPane:
+    """The Stack window's Frames tab: pwndbg's `stack-vis` (the stack split into the
+    current thread's frames), re-run at each stop while shown, like vis-heap-chunks."""
+
+    def __init__(self, app: App) -> None:
+        self.app = app
+        self.term = Term(max_lines=50000)
+        self.view = TextView(app, self.term, "stackvis", follow="none",
+                             empty_hint="The stack frames appear once the program is stopped.")
+        self.count = 10  # frames to draw; 0: all of them
+        self.no_skip = False
+        self.no_truncate = False
+        self.key = None  # (dirty_gen, command) of the output shown
+        self.pending = False
+        self.select = False  # select the Frames tab at the next frame
+
+    def command(self) -> str:
+        parts = ["stack-vis", str(self.count) if self.count else "--all-frames"]
+        if self.no_skip:
+            parts.append("--no-skip")
+        if self.no_truncate:
+            parts.append("--no-truncate")
+        return " ".join(parts)
+
+    def gui(self) -> None:
+        app = self.app
+        imgui.align_text_to_frame_padding()
+        imgui.text_disabled("Frames")
+        imgui.same_line()
+        imgui.set_next_item_width(imgui.get_font_size() * 6)
+        _, self.count = imgui.input_int("##svcount", self.count, 1)
+        self.count = max(0, min(self.count, 1000))
+        imgui.set_item_tooltip("How many frames to draw (0: all of them)")
+        imgui.same_line()
+        _, self.no_skip = imgui.checkbox("No skip##svskip", self.no_skip)
+        imgui.set_item_tooltip("Show repeated rows instead of collapsing them (--no-skip)")
+        imgui.same_line()
+        _, self.no_truncate = imgui.checkbox("Whole frames##svtrunc", self.no_truncate)
+        imgui.set_item_tooltip("Don't truncate large frames (--no-truncate)")
+        cmd = self.command()
+        key = (app.dirty_gen, cmd)
+        if app.is_stopped() and key != self.key and not self.pending and app.rpc:
+            self.pending = True
+            self.key = key
+
+            def done(out) -> None:
+                self.pending = False
+                self.term.set_text(out or "(no output)\n")
+
+            def fail(err) -> None:
+                self.pending = False
+                self.term.set_text(f"\x1b[31m{err}\x1b[0m\n")
+
+            app.rpc.request("exec", done, fail, cmd=cmd)
+        self.view.render()
+
+
 class StopRefreshed:
     """Data fetched from the agent once per stop, and only while the pane is drawn."""
 

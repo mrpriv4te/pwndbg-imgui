@@ -2,7 +2,7 @@ import pytest
 
 pytest.importorskip("imgui_bundle")  # the panes are GUI code; only their logic is tested here
 
-from pwndbg_imgui.ui.panes import VmmapPane  # noqa: E402
+from pwndbg_imgui.ui.panes import StackVisPane, VmmapPane  # noqa: E402
 
 PAGES = [
     (0x400000, 0x401000, "r--p", 0, "/home/u/chall", "code"),
@@ -25,6 +25,17 @@ def test_vmmap_filter(flt, expected):
     pane = VmmapPane(app=None)  # type: ignore[arg-type]  # matches() doesn't use the app
     pane.filter = flt
     assert [i for i, p in enumerate(PAGES) if pane.matches(p)] == expected
+
+
+@pytest.mark.parametrize("count,no_skip,no_truncate,cmd", [
+    (10, False, False, "stack-vis 10"),
+    (0, False, False, "stack-vis --all-frames"),  # 0 frames: all of them
+    (3, True, True, "stack-vis 3 --no-skip --no-truncate"),
+])
+def test_stack_vis_command(count, no_skip, no_truncate, cmd):
+    pane = StackVisPane.__new__(StackVisPane)  # command() needs no app or widgets
+    pane.count, pane.no_skip, pane.no_truncate = count, no_skip, no_truncate
+    assert pane.command() == cmd
 
 
 def test_x11_client_message_has_the_size_of_xevent():
