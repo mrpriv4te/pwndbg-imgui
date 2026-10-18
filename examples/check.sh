@@ -34,6 +34,15 @@ else skipped heap-musl "not built: make heap-musl (needs zig)"; fi
 if [ -x threads/threads ]; then guitest threads threads/threads.steps threads ./threads
 else skipped threads "not built: make threads"; fi
 
+# --terminal-io needs a terminal to start from: check.py runs guitest in a pseudo-terminal
+if [ -x curses/cursesdemo ]; then
+    if PYTHONPATH="$root/src" "$python" curses/check.py "$out/curses" > "$out/curses.log" 2>&1; then
+        echo "pass  curses"; pass=$((pass + 1))
+    else
+        echo "FAIL  curses   (log: $out/curses.log)"; fail=$((fail + 1))
+    fi
+else skipped curses "not built: make curses (needs libncurses-dev)"; fi
+
 port=23990
 for spec in aarch64:8:little arm:4:little mips:4:big; do
     arch=${spec%%:*}

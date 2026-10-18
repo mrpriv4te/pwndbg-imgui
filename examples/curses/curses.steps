@@ -1,0 +1,11 @@
+# tools/guitest.py steps for cursesdemo with --terminal-io, run by check.py, which plays
+# the user in the terminal: arrow key at 6 s, resize at 7 s, Ctrl-C at 8 s, q at 12 s.
+2   cmd   run
+4   py    assert app.io is None and app.cfg.terminal_io, app.cfg.terminal_io  # no Program I/O pane of ours
+4.2 py    [setattr(d, "focus_window_at_next_frame", True) for d in hello_imgui.get_runner_params().docking_params.dockable_windows if d.label.endswith("Program I/O")]
+5   shot  program-io  Program I/O
+10  py    assert app.is_stopped(), app.state  # Ctrl-C in that terminal interrupted the program, not the GUI
+10.2 shot interrupted
+10.5 cmd  continue
+15  py    assert not app.state.get("alive"), app.state  # q ended it
+16  quit

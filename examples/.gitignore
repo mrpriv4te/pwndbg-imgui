@@ -2,6 +2,7 @@
 heap/heapdemo
 heap/heapdemo-musl
 threads/threads
+curses/cursesdemo
 multiarch/hello-aarch64
 multiarch/hello-arm
 multiarch/hello-mips
