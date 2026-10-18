@@ -56,6 +56,15 @@ def test_attach_disables_program_io():
     assert (cfg.attach_fd, cfg.gdb_pid, cfg.no_io) == (5, 42, True)
 
 
+def test_terminal_io_uses_the_launching_terminal(monkeypatch):
+    monkeypatch.setattr(cli, "launch_terminal", lambda: "/dev/pts/7")
+    cfg = cli.parse_args(["--terminal-io", "./bin"])
+    assert cfg.terminal_io == "/dev/pts/7" and cfg.no_io and cfg.gdb_args == ["./bin"]
+    monkeypatch.setattr(cli, "launch_terminal", lambda: None)  # e.g. started from a desktop launcher
+    with pytest.raises(SystemExit):
+        cli.parse_args(["--terminal-io", "./bin"])
+
+
 def test_debug_flag_sets_env(monkeypatch):
     monkeypatch.delenv(ENV_DEBUG, raising=False)
     cli.parse_args(["--debug"])
@@ -104,3 +113,18 @@ def test_every_public_option_is_documented():
     hidden = {"--attach", "--gdb-pid", "--args", "--help"}  # internal, or gdb's own
     documented = set(re.findall(r"(--[a-z-]+)", cli.usage()))
     assert handled - hidden <= documented
+
+
+def test_child_pids_finds_a_child():
+    import subprocess
+    import sys
+
+    from pwndbg_imgui.transport import child_pids
+
+    p = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(5)"])
+    try:
+        assert p.pid in child_pids(os.getpid())
+    finally:
+        p.kill()
+        p.wait()
+    assert child_pids(2**22 + 12345) == []  # no such process

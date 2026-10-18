@@ -31,6 +31,9 @@ ENV_TTY = "PWNDBG_IMGUI_TTY"
 ENV_INIT = "PWNDBG_IMGUI_INIT"
 
 
+ENV_TERM = "PWNDBG_IMGUI_TERM"  # --terminal-io: the user's TERM, for the program (gdb gets xterm-256color)
+
+
 ENV_DEBUG = "PWNDBG_IMGUI_DEBUG"
 
 
@@ -313,13 +316,20 @@ class Agent:
         else:
             tty = os.environ.pop(ENV_TTY, "")
             spec = os.environ.pop(ENV_INIT, "auto")
-            for var in (ENV_FD, ENV_TTY, ENV_INIT):
+            term = os.environ.pop(ENV_TERM, "")
+            for var in (ENV_FD, ENV_TTY, ENV_INIT, ENV_TERM):
                 self.quiet(f"unset environment {var}")
             self.load_pwndbg(spec)
             for cmd in ("set editing off", "set pagination off", "set confirm off", "set height 0", "set width 0"):
                 self.quiet(cmd)
+            # gdb exports its own screen size as LINES/COLUMNS to the program, which
+            # curses prefers to the terminal's: the program's terminal would never resize
+            for var in ("LINES", "COLUMNS"):
+                self.quiet(f"unset environment {var}")
             if tty:
                 self.quiet(f"set inferior-tty {tty}")
+            if term:  # the program draws in the user's terminal: give it that terminal's type
+                self.quiet(f"set environment TERM {term}")
 
         if self.pwndbg_loaded():
             import pwndbg

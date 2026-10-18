@@ -15,12 +15,12 @@ from imgui_bundle import ImVec2, hello_imgui, imgui
 from imgui_bundle import icons_fontawesome_6 as fa
 from .. import APP_NAME
 from .. import agent
-from ..agent import ENV_FD, ENV_INIT, ENV_TTY, SECTIONS, debug
+from ..agent import ENV_FD, ENV_INIT, ENV_TERM, ENV_TTY, SECTIONS, debug
 from ..fonts import find_mono_fonts
 from ..settings import Settings, config_dir
 from ..term import Term, strip_ansi
 from ..theme import THEMES
-from ..transport import Pty, Rpc
+from ..transport import Pty, Rpc, child_pids
 from .appearance import AppearanceMixin
 from .chrome import ChromeMixin
 from .native import NativeWindow, capsule_pointer
@@ -778,7 +778,9 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
             env.pop(var, None)
         env["TERM"] = "xterm-256color"
         env[ENV_FD] = str(child.fileno())
-        env[ENV_TTY] = self.io.path if self.io else ""
+        env[ENV_TTY] = self.cfg.terminal_io or (self.io.path if self.io else "")
+        if self.cfg.terminal_io and os.environ.get("TERM"):
+            env[ENV_TERM] = os.environ["TERM"]  # set for the program; gdb's own console keeps xterm-256color
         env[ENV_INIT] = self.cfg.init
         # gdb runs its own Python (with pwndbg's environment): load the stdlib-only
         # agent from its file instead of exposing this package's environment to it.
@@ -929,6 +931,9 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         button (settings saved, gdb stopped). A second Ctrl-C forces it."""
         import signal
 
+        if signum == signal.SIGINT and self.cfg.terminal_io and self.is_running():
+            self.interrupt()  # --terminal-io: Ctrl-C there is meant for the program, as in gdb
+            return
         if self.exit_signal:
             signal.signal(signal.SIGINT, signal.SIG_DFL)  # a third one kills outright
             raise KeyboardInterrupt
@@ -936,11 +941,60 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         hint = " (Ctrl-C again to force)" if signum == signal.SIGINT else ""
         print(f"\n{APP_NAME}: closing...{hint}", file=sys.stderr)
 
+    def terminal_io_begin(self):
+        """--terminal-io: remember the terminal's modes (a full-screen program killed
+        mid-way leaves it raw) and pass window resizes on to the program, which isn't in
+        the terminal's foreground process group and so doesn't get SIGWINCH itself."""
+        import signal
+        import termios
+
+        if not self.cfg.terminal_io:
+            return None
+        try:
+            fd = os.open(self.cfg.terminal_io, os.O_RDWR | os.O_NOCTTY)
+        except OSError:
+            debug("terminal-io: open")
+            return None
+        try:
+            modes = termios.tcgetattr(fd)
+        except termios.error:
+            debug("terminal-io: tcgetattr")
+            modes = None
+
+        def resized(_signum, _frame) -> None:
+            # the agent only reports the program's pid while it's stopped: ask /proc for
+            # gdb's children (the program, after startup-with-shell has exec'd it)
+            for pid in child_pids(self.proc.pid) if self.proc else ():
+                try:
+                    os.kill(pid, signal.SIGWINCH)
+                except OSError:
+                    pass
+
+        winch = signal.signal(signal.SIGWINCH, resized)
+        return fd, modes, winch
+
+    def terminal_io_end(self, term) -> None:
+        import signal
+        import termios
+
+        if term is None:
+            return
+        fd, modes, winch = term
+        signal.signal(signal.SIGWINCH, winch)
+        try:
+            if modes is not None:
+                termios.tcsetattr(fd, termios.TCSAFLUSH, modes)
+        except termios.error:
+            debug("terminal-io: tcsetattr")
+        finally:
+            os.close(fd)
+
     def run(self) -> int:
         """Run until the window closes; returns the process exit status."""
         import signal
 
         previous = {s: signal.signal(s, self.on_exit_signal) for s in (signal.SIGINT, signal.SIGTERM)}
+        term = self.terminal_io_begin()
         rp = None
         try:
             if self.attached:
@@ -955,6 +1009,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
                 sanitize_window_geometry(rp.ini_filename)  # e.g. closed while minimized
             for s, handler in previous.items():
                 signal.signal(s, handler)
+            self.terminal_io_end(term)
         return 128 + self.exit_signal if self.exit_signal else 0
 
 

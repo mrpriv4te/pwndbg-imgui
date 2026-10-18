@@ -151,3 +151,15 @@ class Pty:
             fcntl.ioctl(self.master, termios.TIOCSWINSZ, struct.pack("HHHH", rows, cols, 0, 0))
         except OSError:
             pass
+
+
+def child_pids(pid: int) -> list[int]:
+    """The child processes of pid (Linux /proc), [] if it can't tell."""
+    out = []
+    try:
+        for tid in os.listdir(f"/proc/{pid}/task"):
+            with open(f"/proc/{pid}/task/{tid}/children") as f:
+                out += [int(c) for c in f.read().split()]
+    except OSError:
+        return []
+    return out

@@ -246,6 +246,11 @@ class ProgramIOPane:
                 imgui.bullet_text("pwntools (gdb.debug, exploit.py -d ui): from the script, "
                                   "e.g. io.sendline(...) / io.interactive()")
                 imgui.bullet_text("gdbserver started by hand: in the terminal where gdbserver runs")
+            elif app.cfg.terminal_io:
+                imgui.text_colored(v4(th.accent), f"{fa.ICON_FA_CIRCLE_INFO}  Program I/O in your terminal (--terminal-io)")
+                imgui.text_disabled(f"The program reads and writes the terminal pwndbg-imgui was started from "
+                                    f"({app.cfg.terminal_io}): type there, e.g. for ncurses programs. Ctrl-C there "
+                                    "interrupts the running program.")
             else:
                 imgui.text_disabled("Program I/O is disabled (--no-io): the program shares the gdb console.")
             imgui.pop_text_wrap_pos()

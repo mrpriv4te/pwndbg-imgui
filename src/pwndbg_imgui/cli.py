@@ -37,6 +37,7 @@ class LaunchConfig:
         self.font: str | None = None
         self.font_size: float | None = None
         self.no_io = False
+        self.terminal_io: str | None = None  # --terminal-io: the launching terminal's device
         self.reset_layout = False
         self.no_viewports = False
         self.maximize = False
@@ -94,6 +95,9 @@ GUI options:
   --font PATH         monospace .ttf/.otf font for code panes
   --font-size N       font size
   --no-io             do not give the program its own terminal pane
+  --terminal-io       run the program in the terminal that started %(prog)s
+                      instead of the Program I/O pane (for ncurses / full-screen
+                      programs); Ctrl-C there interrupts the running program
   --no-viewports      keep every window inside the main window
   --maximize          start with the main window maximized
   --reset-layout      start with the default window layout
@@ -174,6 +178,11 @@ def parse_args(argv: list[str]) -> LaunchConfig:
             cfg.init = "none"
         elif a == "--no-io":
             cfg.no_io = True
+        elif a == "--terminal-io":
+            cfg.terminal_io = launch_terminal()
+            if cfg.terminal_io is None:
+                sys.exit(f"{APP_NAME}: --terminal-io needs to be started from a terminal")
+            cfg.no_io = True  # no pane: the program's I/O is that terminal
         elif a == "--agent-path":
             from . import agent
 
@@ -210,6 +219,17 @@ def parse_args(argv: list[str]) -> LaunchConfig:
     cfg.gdb_args = rest
     cfg.binary = guess_binary(rest)
     return cfg
+
+
+def launch_terminal() -> str | None:
+    """The terminal device pwndbg-imgui was started from (its stdin, stdout or stderr)."""
+    for fd in (0, 1, 2):
+        try:
+            if os.isatty(fd):
+                return os.ttyname(fd)
+        except OSError:
+            continue
+    return None
 
 
 def guess_binary(args: list[str]) -> str | None:

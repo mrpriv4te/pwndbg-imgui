@@ -96,8 +96,14 @@ pwndbg-imgui -ex 'target remote :1234' ./chall
 ```
 
 GUI options: `--gdb PATH`, `--pwndbg PATH`, `--init-cmd CMD`, `--no-pwndbg`,
-`--theme NAME`, `--font PATH`, `--font-size N`, `--no-io`, `--no-viewports`, `--maximize`,
-`--reset-layout`, `--list-themes`, `--version`, `--debug` (see `--help`).
+`--theme NAME`, `--font PATH`, `--font-size N`, `--no-io`, `--terminal-io`, `--no-viewports`,
+`--maximize`, `--reset-layout`, `--list-themes`, `--version`, `--debug` (see `--help`).
+
+Debugging a full-screen program (ncurses, a TUI)? Start it with `--terminal-io`: it then
+runs in the terminal you launched pwndbg-imgui from instead of the Program I/O pane, with
+your terminal's type and size (resizes included), and <kbd>Ctrl</kbd>+<kbd>C</kbd> there
+interrupts it. The terminal's modes are restored when the GUI exits. Try it with
+[`examples/curses`](examples/curses).
 
 Something misbehaving? Run with `--debug` (or set `PWNDBG_IMGUI_DEBUG=1`, which also
 works for the attached mode): errors that are normally handled silently, on both the
@@ -196,7 +202,8 @@ a [CTF challenge](examples/creneau-serre) with a pwntools exploit template.
 - **⌨️ Program I/O** — the program gets its own terminal (stdin/stdout separate from gdb),
   raw mode (binary-safe). Send as text, hex, or a pwntools-style Python expression
   (`b"A"*40 + p64(0x401136)`, `flat(...)`, `cyclic(100)`), non-printables shown as `\xNN`,
-  plus a hexdump view of the output.
+  plus a hexdump view of the output. Or `--terminal-io` to keep it in your own terminal
+  (ncurses programs).
 - **🔬 Memory** — region-colored hexdump / pointer-sized words (pwndbg legend), bytes changed
   since the last stop highlighted, in-place editing (type hex digits), follow an expression
   (`$sp`, `$rdi`…), value inspector.
