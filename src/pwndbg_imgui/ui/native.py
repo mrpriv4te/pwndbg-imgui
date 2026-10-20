@@ -76,6 +76,7 @@ class NativeWindow:
             self.platform = lib.glfwGetPlatform()
             self.can_move = self.platform != self.PLATFORM_WAYLAND  # Wayland forbids it
         self._x11 = None  # (libX11, Display*, Window, root, _NET_WM_MOVERESIZE atom), set up on first use
+        self._keycodes: dict[str, list[int]] | None = None  # modifiers_down(): X keycodes, once
 
     def _x11_setup(self) -> bool:
         """Resolve libX11, the X display / window and the _NET_WM_MOVERESIZE atom, once."""
@@ -105,6 +106,33 @@ class NativeWindow:
         except (OSError, AttributeError):
             return False
         return True
+
+    # X keysyms of each modifier ImGui tracks (AltGr counts as Alt, as GLFW reports it)
+    MODIFIER_KEYSYMS = {"ctrl": (0xFFE3, 0xFFE4), "shift": (0xFFE1, 0xFFE2),
+                        "alt": (0xFFE9, 0xFFEA, 0xFE03), "super": (0xFFEB, 0xFFEC)}
+
+    def modifiers_down(self) -> dict[str, bool] | None:
+        """Which modifiers are physically held right now, from the X server (None without
+        X11). GLFW only learns of a release through a key event, and a desktop shortcut
+        (Super+…, Alt+Tab) can swallow it: ImGui then thinks the key is still down."""
+        if not self._x11_setup() or self._x11 is None:
+            return None
+        ct = self.ct
+        x11, dpy = self._x11[0], self._x11[1]
+        try:
+            if self._keycodes is None:
+                x11.XQueryKeymap.argtypes = [ct.c_void_p, ct.c_char_p]
+                x11.XKeysymToKeycode.restype = ct.c_ubyte
+                x11.XKeysymToKeycode.argtypes = [ct.c_void_p, ct.c_ulong]
+                self._keycodes = {m: [x11.XKeysymToKeycode(dpy, k) for k in syms]
+                                  for m, syms in self.MODIFIER_KEYSYMS.items()}
+            keys = ct.create_string_buffer(32)
+            x11.XQueryKeymap(dpy, keys)
+            bits = keys.raw  # a bit per keycode
+            return {m: any(c and bits[c >> 3] & (1 << (c & 7)) for c in codes)
+                    for m, codes in self._keycodes.items()}
+        except (OSError, AttributeError):
+            return None
 
     def wm_move(self, win=None) -> bool:
         """Hand a title-bar drag to the window manager (X11 `_NET_WM_MOVERESIZE`), as a

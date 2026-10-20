@@ -193,6 +193,10 @@ with their own context menu add `card.copy_menu(row)` to it.
 - `save_breakpoints` only writes when `bps_dirty` is set, so a session that never loaded or
   created breakpoints can't wipe the saved list. Restoring is opt-in (a toast).
 - ImGui IDs: labels in loops / context menus need unique `##id` suffixes or they collide.
+- A modifier can stay "held" in ImGui when a desktop shortcut (Super+…, Alt+Tab) eats its
+  release; Enter then becomes Super+Enter and **no input box submits**.
+  `App.release_stuck_modifiers` checks X's real key state (`NativeWindow.modifiers_down`)
+  each frame one looks held. `--debug` logs both the symptom and the release.
 - Loading pwndbg by `runpy`/file sets `__file__` and `sys.argv[0]`, which confuses pwndbg;
   `load_pwndbg` blanks both while loading and restores them after.
 - Sliders that change fonts/sizes must apply on release (`is_item_deactivated_after_edit`),

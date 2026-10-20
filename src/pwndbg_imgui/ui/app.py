@@ -699,6 +699,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
             io.add_mouse_button_event(0, False)
 
     def pre_new_frame(self) -> None:
+        self.release_stuck_modifiers()
         self.process_inbox()
         if self.proc is not None and self.proc.poll() is not None and not self.exiting:
             hello_imgui.get_runner_params().app_shall_exit = True
@@ -729,6 +730,28 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
             style.font_size_base = self.ui_size
             style._next_frame_font_size_base = self.ui_size
         self.sync_layout()
+
+    STUCK_MODIFIERS = {"ctrl": (imgui.Key.left_ctrl, imgui.Key.right_ctrl, imgui.Key.mod_ctrl),
+                       "shift": (imgui.Key.left_shift, imgui.Key.right_shift, imgui.Key.mod_shift),
+                       "alt": (imgui.Key.left_alt, imgui.Key.right_alt, imgui.Key.mod_alt),
+                       "super": (imgui.Key.left_super, imgui.Key.right_super, imgui.Key.mod_super)}
+
+    def release_stuck_modifiers(self) -> None:
+        """A modifier ImGui believes held but the keyboard doesn't (its release went to a
+        desktop shortcut, e.g. Super+… or Alt+Tab) turns Enter into Super+Enter in every
+        input box. Ask X for the real state while one looks held, and release it."""
+        io = imgui.get_io()
+        held = {"ctrl": io.key_ctrl, "shift": io.key_shift, "alt": io.key_alt, "super": io.key_super}
+        if not any(held.values()) or self.window_ctl is None:
+            return
+        real = self.window_ctl.modifiers_down()
+        if real is None:
+            return
+        for mod, down in held.items():
+            if down and not real[mod]:
+                debug(f"keyboard: {mod} looked held but is up: released")
+                for key in self.STUCK_MODIFIERS[mod]:
+                    io.add_key_event(key, False)
 
     def post_init(self) -> None:
         native = None
