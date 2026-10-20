@@ -31,6 +31,16 @@ class XClientMessageEvent(ctypes.Structure):
                 ("format", ctypes.c_int), ("l", ctypes.c_long * 5), ("pad", ctypes.c_long * 12)]
 
 
+class XKeyEvent(ctypes.Structure):
+    """Xlib's XKeyEvent, padded to sizeof(XEvent) (24 longs)."""
+
+    _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong), ("send_event", ctypes.c_int),
+                ("display", ctypes.c_void_p), ("window", ctypes.c_ulong), ("root", ctypes.c_ulong),
+                ("subwindow", ctypes.c_ulong), ("time", ctypes.c_ulong), ("x", ctypes.c_int), ("y", ctypes.c_int),
+                ("x_root", ctypes.c_int), ("y_root", ctypes.c_int), ("state", ctypes.c_uint),
+                ("keycode", ctypes.c_uint), ("same_screen", ctypes.c_int), ("pad", ctypes.c_long * 12)]
+
+
 class NativeWindow:
     """Just enough of GLFW (through ctypes, using the library bundled with
     imgui_bundle) to drive a borderless main window: move, minimize, maximize."""
@@ -133,6 +143,30 @@ class NativeWindow:
                     for m, codes in self._keycodes.items()}
         except (OSError, AttributeError):
             return None
+
+    def send_key(self, keysym: int, press: bool, win=None) -> bool:
+        """Send a KeyPress / KeyRelease of keysym to one of our GLFW windows (default the
+        main one), as if typed there: GLFW updates its own key state from it."""
+        if not self._x11_setup() or self._x11 is None:
+            return False
+        ct = self.ct
+        try:
+            x11, dpy, root = self._x11[0], self._x11[1], self._x11[2]
+            x11.XKeysymToKeycode.restype = ct.c_ubyte
+            x11.XKeysymToKeycode.argtypes = [ct.c_void_p, ct.c_ulong]
+            code = x11.XKeysymToKeycode(dpy, keysym)
+            win = ct.c_void_p(win) if isinstance(win, int) else (win or self.win)
+            xwin = self.lib.glfwGetX11Window(win)
+            if not code or not xwin:
+                return False
+            ev = XKeyEvent(type=2 if press else 3, send_event=1, display=dpy, window=xwin, root=root,
+                           keycode=code, same_screen=1)
+            mask = 1 if press else 2  # KeyPressMask / KeyReleaseMask
+            x11.XSendEvent(dpy, xwin, 1, mask, ct.byref(ev))
+            x11.XFlush(dpy)
+            return True
+        except (OSError, AttributeError):
+            return False
 
     def wm_move(self, win=None) -> bool:
         """Hand a title-bar drag to the window manager (X11 `_NET_WM_MOVERESIZE`), as a

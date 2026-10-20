@@ -47,6 +47,18 @@ def test_x11_client_message_has_the_size_of_xevent():
     assert XClientMessageEvent.l.offset == 7 * ctypes.sizeof(ctypes.c_long)  # data.l, as in <X11/Xlib.h>
 
 
+def test_x11_key_event_matches_xlib():
+    import ctypes
+
+    from pwndbg_imgui.ui.native import XKeyEvent
+
+    long = ctypes.sizeof(ctypes.c_long)
+    assert ctypes.sizeof(XKeyEvent) == 24 * long  # sizeof(XEvent)
+    # <X11/Xlib.h> XKeyEvent on LP64: state at 80, keycode at 84, same_screen at 88
+    assert (XKeyEvent.state.offset, XKeyEvent.keycode.offset, XKeyEvent.same_screen.offset) == (
+        (80, 84, 88) if long == 8 else (48, 52, 56))
+
+
 def test_imgui_bindings_used_by_the_detached_view_drag():
     # App.handoff_viewport_drag only runs during a real drag, so a renamed binding would
     # only show up then (it did: ViewportP has no `id`): check the names it relies on

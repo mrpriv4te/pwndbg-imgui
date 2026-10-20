@@ -135,6 +135,7 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.config_pane = ConfigPane(self)
         self.cyclic_pane = CyclicPane(self)
         self.profiler = Profiler(cfg.profile) if cfg.profile else None  # --profile
+        self._mod_mismatch: dict[str, float] = {}  # modifier -> since when ImGui has it held but X up
         self.profiler_pane = ProfilerPane(self)
         # misc tool state
         self.watch_input = ""
@@ -736,22 +737,46 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
                        "alt": (imgui.Key.left_alt, imgui.Key.right_alt, imgui.Key.mod_alt),
                        "super": (imgui.Key.left_super, imgui.Key.right_super, imgui.Key.mod_super)}
 
+    STUCK_AFTER = 0.2  # seconds a modifier must look held while it's up
+
     def release_stuck_modifiers(self) -> None:
         """A modifier ImGui believes held but the keyboard doesn't (its release went to a
         desktop shortcut, e.g. Super+… or Alt+Tab) turns Enter into Super+Enter in every
-        input box. Ask X for the real state while one looks held, and release it."""
+        input box. Ask X for the real state while one looks held, and release it.
+
+        Releasing it in ImGui alone isn't enough: GLFW missed the release too, and the
+        backend re-reads GLFW's key state with every key event, so the next key (Enter)
+        would bring the modifier back. Send GLFW the release it missed, as an X event.
+
+        Only after STUCK_AFTER seconds: a normal release reaches the X server's key state
+        a frame or so before GLFW reads its event, and that isn't a stuck key."""
         io = imgui.get_io()
         held = {"ctrl": io.key_ctrl, "shift": io.key_shift, "alt": io.key_alt, "super": io.key_super}
-        if not any(held.values()) or self.window_ctl is None:
-            return
-        real = self.window_ctl.modifiers_down()
-        if real is None:
-            return
+        ctl = self.window_ctl
+        real = ctl.modifiers_down() if any(held.values()) and ctl is not None else None
+        now = time.monotonic()
+        since = self._mod_mismatch
         for mod, down in held.items():
-            if down and not real[mod]:
-                debug(f"keyboard: {mod} looked held but is up: released")
-                for key in self.STUCK_MODIFIERS[mod]:
-                    io.add_key_event(key, False)
+            if real is not None and down and not real[mod]:
+                since.setdefault(mod, now)
+            else:
+                since.pop(mod, None)
+        stuck = [mod for mod, t0 in since.items() if now - t0 >= self.STUCK_AFTER]
+        if not stuck or ctl is None:
+            return
+        windows = {ctl.win.value}  # the main window and the detached views
+        for vp in imgui.get_platform_io().viewports:
+            ptr = capsule_pointer(vp.platform_handle)
+            if ptr:
+                windows.add(ptr)
+        for mod in stuck:
+            debug(f"keyboard: {mod} looked held but is up: released")
+            for keysym in ctl.MODIFIER_KEYSYMS[mod]:
+                for win in windows:
+                    ctl.send_key(keysym, False, win)  # GLFW ignores it for keys it has up
+            for key in self.STUCK_MODIFIERS[mod]:
+                io.add_key_event(key, False)  # this frame already, before GLFW reads the X event
+            since.pop(mod, None)
 
     def post_init(self) -> None:
         native = None

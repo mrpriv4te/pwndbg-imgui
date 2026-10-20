@@ -196,7 +196,9 @@ with their own context menu add `card.copy_menu(row)` to it.
 - A modifier can stay "held" in ImGui when a desktop shortcut (Super+…, Alt+Tab) eats its
   release; Enter then becomes Super+Enter and **no input box submits**.
   `App.release_stuck_modifiers` checks X's real key state (`NativeWindow.modifiers_down`)
-  each frame one looks held. `--debug` logs both the symptom and the release.
+  while one looks held, and after 0.2 s sends **GLFW** the missed release as an X event
+  (`NativeWindow.send_key`): releasing it in ImGui alone doesn't last, the GLFW backend
+  re-reads GLFW's stale key state with every key event. `--debug` logs each release.
 - Loading pwndbg by `runpy`/file sets `__file__` and `sys.argv[0]`, which confuses pwndbg;
   `load_pwndbg` blanks both while loading and restores them after.
 - Sliders that change fonts/sizes must apply on release (`is_item_deactivated_after_edit`),
