@@ -17,6 +17,7 @@ from .. import APP_NAME
 from .. import agent
 from ..agent import ENV_FD, ENV_INIT, ENV_TERM, ENV_TTY, SECTIONS, debug
 from ..fonts import find_mono_fonts
+from ..profiling import Profiler
 from ..settings import Settings, config_dir
 from ..term import Term, strip_ansi
 from ..theme import THEMES
@@ -27,7 +28,8 @@ from .native import NativeWindow, capsule_pointer
 from .console_panes import ConsolePane, ProgramIOPane
 from .panels import PanelsMixin
 from .tool_panes import CommandsPane, ConfigPane, CyclicPane
-from .panes import BacktracePane, BreakpointsPane, HeapPane, RegistersBar, StackVisPane, ThreadsPane, VmmapPane
+from .panes import (BacktracePane, BreakpointsPane, HeapPane, ProfilerPane, RegistersBar, StackVisPane, ThreadsPane,
+                    VmmapPane)
 from .sections import SectionsMixin
 from .views import CmdView, DecompView, DisasmTarget, MemoryView
 from .widgets import TableCard, TextView, ansi_inline, v4
@@ -132,6 +134,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.commands_pane = CommandsPane(self)
         self.config_pane = ConfigPane(self)
         self.cyclic_pane = CyclicPane(self)
+        self.profiler = Profiler(cfg.profile) if cfg.profile else None  # --profile
+        self.profiler_pane = ProfilerPane(self)
         # misc tool state
         self.watch_input = ""
         self.palette_open = False
@@ -708,7 +712,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
             self._restore_layout_ini = None
         rp = hello_imgui.get_runner_params()
         for v in self.views_to_add:
-            dw = hello_imgui.DockableWindow(v.label, "MainDockSpace", v.gui)
+            gui = v.gui if self.profiler is None else self.profiler.timed(profile_name(v.label), v.gui)
+            dw = hello_imgui.DockableWindow(v.label, "MainDockSpace", gui)
             dw.focus_window_at_next_frame = not v.restored
             dw.remember_is_visible = False
             dw.include_in_view_menu = False
@@ -849,6 +854,24 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
             except OSError:
                 pass
 
+    def _profile_runner(self, rp, windows) -> None:
+        """--profile: time each frame's phases, and every window / bar / menu."""
+        prof = self.profiler
+        cb = rp.callbacks
+        pre = cb.pre_new_frame
+
+        def pre_new_frame() -> None:
+            prof.frame_begin()
+            pre()
+
+        cb.pre_new_frame = pre_new_frame
+        cb.before_imgui_render = prof.render_begin
+        cb.after_swap = prof.frame_end
+        cb.show_menus = prof.timed("(menu bar)", cb.show_menus)
+        cb.show_gui = prof.timed("(overlays: dialogs, toasts, palette)", cb.show_gui)
+        for dw in windows:
+            dw.gui_function = prof.timed(profile_name(dw.label), dw.gui_function)
+
     def build_runner(self):
         rp = hello_imgui.RunnerParams()
         title = APP_NAME + (f" — {os.path.basename(self.cfg.binary)}" if self.cfg.binary else "")
@@ -892,9 +915,13 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         cb.post_init = self.post_init
         cb.before_exit = self.before_exit
         opts = hello_imgui.EdgeToolbarOptions(size_em=2.35, window_padding_em=ImVec2(0.5, 0.25))
-        cb.add_edge_toolbar(hello_imgui.EdgeToolbarType.top, self.toolbar, opts)
+        toolbar, status_bar = self.toolbar, self.status_bar
+        if self.profiler is not None:
+            toolbar = self.profiler.timed("(toolbar)", toolbar)
+            status_bar = self.profiler.timed("(status bar)", status_bar)
+        cb.add_edge_toolbar(hello_imgui.EdgeToolbarType.top, toolbar, opts)
         status = hello_imgui.EdgeToolbarOptions(size_em=1.6, window_padding_em=ImVec2(0.6, 0.2))
-        cb.add_edge_toolbar(hello_imgui.EdgeToolbarType.bottom, self.status_bar, status)
+        cb.add_edge_toolbar(hello_imgui.EdgeToolbarType.bottom, status_bar, status)
 
         rp.docking_params.docking_splits = [
             hello_imgui.DockingSplit(parent, new, getattr(imgui.Dir, side), ratio)
@@ -922,6 +949,8 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         for dw in windows:
             if dw.label in (self.sections["disasm"]["label"], f"{fa.ICON_FA_TERMINAL} Console"):
                 dw.focus_window_at_next_frame = True
+        if self.profiler is not None:
+            self._profile_runner(rp, windows)
         rp.docking_params.dockable_windows = windows
         rp.docking_params.main_dock_space_node_flags = imgui.DockNodeFlags_.none
         return rp
@@ -940,6 +969,25 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
         self.exit_signal = signum
         hint = " (Ctrl-C again to force)" if signum == signal.SIGINT else ""
         print(f"\n{APP_NAME}: closing...{hint}", file=sys.stderr)
+
+    def profile_reply(self, op: str, secs: float) -> None:
+        if op != "profile":  # the Profiler window's own polling isn't the app's cost
+            self.profiler.rpc.add(op, secs)
+
+    def write_profile(self) -> None:
+        prof = self.profiler
+        prof.cprof.disable()
+        agent = None
+        try:
+            with open(os.path.join(prof.out_dir, "agent-ops.json")) as f:
+                agent = json.load(f)
+        except (OSError, ValueError):
+            agent = self.profiler_pane.agent  # the last stats the live window fetched
+        try:
+            path = prof.write(agent)
+            print(f"{APP_NAME}: profile written to {prof.out_dir} (summary: {path})", file=sys.stderr)
+        except OSError as e:
+            print(f"{APP_NAME}: cannot write the profile to {prof.out_dir}: {e}", file=sys.stderr)
 
     def terminal_io_begin(self):
         """--terminal-io: remember the terminal's modes (a full-screen program killed
@@ -1001,16 +1049,27 @@ class App(SectionsMixin, AppearanceMixin, PanelsMixin, ChromeMixin):
                 self.rpc = Rpc(socket.socket(fileno=self.cfg.attach_fd))
             else:
                 self.spawn_gdb()
+            if self.profiler is not None and self.rpc:
+                self.rpc.on_reply = self.profile_reply
+                self.rpc.request("profile", None, None, action="start", path=self.profiler.out_dir)
+                self.profiler.cprof.enable()
             rp = self.build_runner()
             hello_imgui.run(rp)
         finally:
-            self.shutdown()
+            self.shutdown()  # the agent writes agent.prof on quit / disconnect
+            if self.profiler is not None:
+                self.write_profile()
             if rp is not None:
                 sanitize_window_geometry(rp.ini_filename)  # e.g. closed while minimized
             for s, handler in previous.items():
                 signal.signal(s, handler)
             self.terminal_io_end(term)
         return 128 + self.exit_signal if self.exit_signal else 0
+
+
+def profile_name(label: str) -> str:
+    """A window label as plain text for the profile (no icon glyph, no ##id)."""
+    return label.split("##")[0].encode("ascii", "ignore").decode().strip() or label
 
 
 def sanitize_window_geometry(ini_path: str) -> None:

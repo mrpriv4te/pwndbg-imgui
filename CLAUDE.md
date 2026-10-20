@@ -53,6 +53,7 @@ src/pwndbg_imgui/
   fonts.py      fontconfig discovery + glyph fallbacks
   payload.py    cyclic / payload expressions / hexdump
   registers.py  register_cells(): find each register in a regs-pane line (compact columns)
+  profiling.py  --profile, GUI side: frame / window / RPC timings, cProfile, report.txt
   templates/exploit.tmpl   template emitted by `--exploit`
   ui/
     app.py        App: state, gdb process, events, hello_imgui runner (core)
@@ -95,6 +96,11 @@ share state through `self`, which no type checker can follow, so **new panes go 
 - Debugging: `--debug` / `PWNDBG_IMGUI_DEBUG=1` logs every swallowed exception (GUI and
   agent side) with a traceback to `~/.cache/pwndbg-imgui-debug.log` via `agent.debug()`.
   When adding an `except Exception` that hides an error, call `debug("<where>")` in it.
+- Profiling: `--profile[=DIR]` (`profiling.py` GUI side, `Agent.op_profile` gdb side):
+  frame phases, time per window / toolbar / menu (`Profiler.timed` wraps each gui
+  function), RPC round trips (`Rpc.on_reply`), time per agent op inside gdb, and cProfile
+  on both sides; the live Profiler window (`ProfilerPane`) and, on exit, `gui.prof`,
+  `agent.prof`, `agent-ops.json`, `report.txt` in DIR. Use it to check a change's cost.
 - Not on PyPI: install from a clone or `pipx install git+https://github.com/mrpriv4te/pwndbg-imgui`.
 - Config lives in `~/.config/pwndbg-imgui/` (`settings.json`, `layout.ini`).
 - Versioning is **git tags via hatch-vcs** — never hardcode a version. `__version__`

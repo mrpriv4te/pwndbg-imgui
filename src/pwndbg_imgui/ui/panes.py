@@ -7,11 +7,13 @@ New panes go here rather than into the mixins, so they can be type-checked."""
 from __future__ import annotations
 
 import os
+import time
 from typing import TYPE_CHECKING
 
-from imgui_bundle import imgui
+from imgui_bundle import ImVec2, imgui
 from imgui_bundle import icons_fontawesome_6 as fa
 from ..term import Term
+from ..theme import u32
 from .widgets import TableCard, TextView, buttons_width, v4
 
 if TYPE_CHECKING:
@@ -490,6 +492,102 @@ class StackVisPane:
 
             app.rpc.request("exec", done, fail, cmd=cmd)
         self.view.render()
+
+
+class ProfilerPane:
+    """--profile: frame times, the slowest windows and agent ops, live; Write report saves
+    the files a full analysis needs (gui.prof / agent.prof for pstats or snakeviz)."""
+
+    LABEL = f"{fa.ICON_FA_GAUGE_HIGH} Profiler"
+    COLUMNS = ["Name", "Count", "Total ms", "Mean ms", ("Max ms", STRETCH)]
+
+    def __init__(self, app: App) -> None:
+        self.app = app
+        self.agent: dict | None = None  # the agent's `profile` stats
+        self.fetched = 0.0
+        self.status = ""
+        self.cards = {key: TableCard(app, f"##prof{key}", self.COLUMNS, TABLE_FLAGS)
+                      for key in ("windows", "rpc", "agent")}
+
+    def fetch_agent(self, action: str = "stats") -> None:
+        app = self.app
+        if app.rpc and app.connected():
+            self.fetched = time.monotonic()
+            app.rpc.request("profile", lambda r: setattr(self, "agent", r), None, action=action)
+
+    def write(self) -> None:
+        prof = self.app.profiler
+        if prof is None:
+            return
+        self.fetch_agent("write")  # agent.prof, next to ours
+        self.status = f"wrote {prof.write(self.agent)}"
+
+    def _graph(self, values: list[float], top: float) -> None:
+        """Frame times as a line (no numpy for imgui.plot_lines in a plain install)."""
+        th = self.app.theme
+        w = imgui.get_content_region_avail().x
+        h = imgui.get_text_line_height() * 4
+        p0 = imgui.get_cursor_screen_pos()
+        imgui.dummy(ImVec2(w, h))
+        dl = imgui.get_window_draw_list()
+        dl.add_rect_filled(p0, ImVec2(p0.x + w, p0.y + h), u32(th.panel), 4.0)
+        y60 = p0.y + h - h * 16.7 / top
+        dl.add_line(ImVec2(p0.x, y60), ImVec2(p0.x + w, y60), u32(th.yellow, 0.5))
+        every = max(1, int(len(values) / max(1.0, w)))  # at most a point per pixel
+        values = values[::every]
+        step = w / max(1, len(values) - 1)
+        pts: list = [ImVec2(p0.x + i * step, p0.y + h - h * min(v, top) / top) for i, v in enumerate(values)]
+        dl.add_polyline(pts, u32(th.accent), 1.2, 0)  # one call: a line per point costs ms
+
+    def gui(self) -> None:
+        app = self.app
+        prof = app.profiler
+        if prof is None:
+            return
+        if time.monotonic() - self.fetched > 1.0:
+            self.fetch_agent()
+        if imgui.button(f"{fa.ICON_FA_ROTATE_LEFT} Reset##prof"):
+            prof.reset()
+            self.fetch_agent("reset")
+        imgui.set_item_tooltip("Start measuring again from now (GUI and agent)")
+        imgui.same_line()
+        if imgui.button(f"{fa.ICON_FA_FLOPPY_DISK} Write report##prof"):
+            self.write()
+        imgui.set_item_tooltip("Save report.txt, gui.prof and agent.prof now (also done on exit)")
+        imgui.same_line()
+        imgui.push_text_wrap_pos(0)
+        imgui.text_disabled(self.status or f"saved on exit to {prof.out_dir}")
+        imgui.pop_text_wrap_pos()
+        code = list(prof.code_ms)
+        if code:
+            from ..profiling import percentile
+
+            p50, p95 = percentile(code, 50), percentile(code, 95)
+            imgui.text_unformatted(f"GUI code per frame: median {p50:.2f} ms, p95 {p95:.2f} ms, "
+                                   f"max {max(code):.2f} ms  (the line: 16.7 ms = 60 fps)")
+            self._graph(code, max(16.7 * 1.2, p95 * 1.5))
+        avail = imgui.get_content_region_avail().y
+        ops = [tuple(r) for r in (self.agent or {}).get("ops", [])]
+        tables = [("windows", "Windows: time in each gui function", prof.windows.rows()),
+                  ("rpc", "Agent ops: round trip seen by the GUI (includes waiting for gdb and the next frame)",
+                   prof.rpc.rows()),
+                  ("agent", "Agent ops: time inside gdb", ops)]
+        each = max(80.0, avail / 3 - imgui.get_text_line_height_with_spacing() - 4)
+        imgui.push_font(app.mono, app.code_size)
+        for key, title, rows in tables:
+            imgui.pop_font()
+            imgui.text_disabled(title)
+            imgui.push_font(app.mono, app.code_size)
+            card = self.cards[key]
+            if card.begin(rows=len(rows), max_height=each):
+                for name, count, total, mean, mx in rows:
+                    imgui.table_next_row()
+                    for text in (name, str(count), f"{total:.1f}", f"{mean:.2f}", f"{mx:.2f}"):
+                        imgui.table_next_column()
+                        card.cell(text)
+                        imgui.text_unformatted(text)
+            card.end()
+        imgui.pop_font()
 
 
 class StopRefreshed:

@@ -97,7 +97,8 @@ pwndbg-imgui -ex 'target remote :1234' ./chall
 
 GUI options: `--gdb PATH`, `--pwndbg PATH`, `--init-cmd CMD`, `--no-pwndbg`,
 `--theme NAME`, `--font PATH`, `--font-size N`, `--no-io`, `--terminal-io`, `--no-viewports`,
-`--maximize`, `--reset-layout`, `--list-themes`, `--version`, `--debug` (see `--help`).
+`--maximize`, `--reset-layout`, `--list-themes`, `--version`, `--debug`, `--profile`
+(see `--help`).
 
 Debugging a full-screen program (ncurses, a TUI)? Start it with `--terminal-io`: it then
 runs in the terminal you launched pwndbg-imgui from instead of the Program I/O pane, with
@@ -109,6 +110,11 @@ Something misbehaving? Run with `--debug` (or set `PWNDBG_IMGUI_DEBUG=1`, which 
 works for the attached mode): errors that are normally handled silently, on both the
 GUI and the gdb side, are logged with tracebacks to `~/.cache/pwndbg-imgui-debug.log`.
 Please attach that file to bug reports.
+
+Feels slow? Run with `--profile` (or `--profile=DIR`): a live **Profiler** window shows the
+time per frame, per window and per gdb request, and on exit `gui.prof`, `agent.prof` (gdb's
+side, pwndbg included) and a readable `report.txt` are written to a new folder in
+`~/.cache/pwndbg-imgui/`. Open the `.prof` files with `python -m pstats` or snakeviz.
 
 ### 🦾 Other architectures (ARM, AArch64, MIPS…)
 

@@ -38,6 +38,7 @@ class LaunchConfig:
         self.font_size: float | None = None
         self.no_io = False
         self.terminal_io: str | None = None  # --terminal-io: the launching terminal's device
+        self.profile: str | None = None  # --profile: directory for the profile files
         self.reset_layout = False
         self.no_viewports = False
         self.maximize = False
@@ -110,6 +111,10 @@ GUI options:
   --exploit [PATH]    write a pwntools exploit template (./exploit.py, or PATH)
                       with the pwndbg-imgui `-d ui` integration; prints to stdout
                       when piped (pwndbg-imgui --exploit > exploit.py)
+  --profile[=DIR]     measure where pwndbg-imgui spends its time (GUI and gdb
+                      side): a live Profiler window, and on exit gui.prof,
+                      agent.prof and report.txt in DIR (default: a new folder
+                      in ~/.cache/pwndbg-imgui)
   --debug             log swallowed errors (GUI and gdb side) to
                       {debug_log_path()}
   --version           print the pwndbg-imgui version and exit
@@ -166,6 +171,11 @@ def parse_args(argv: list[str]) -> LaunchConfig:
         elif a in ("-h", "--help"):
             print(usage())
             sys.exit(0)
+        elif a == "--profile" or a.startswith("--profile="):
+            from .profiling import default_dir
+
+            where = a.partition("=")[2]
+            cfg.profile = os.path.abspath(os.path.expanduser(where)) if where else default_dir()
         elif a == "--debug":
             os.environ[ENV_DEBUG] = "1"  # inherited by gdb, so the agent logs too
         elif a == "--version":

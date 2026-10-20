@@ -9,7 +9,7 @@ from imgui_bundle import icons_fontawesome_6 as fa
 from ..theme import THEMES
 from .console_panes import ConsolePane, ProgramIOPane
 from .tool_panes import CommandsPane, ConfigPane, CyclicPane
-from .panes import BreakpointsPane, HeapPane, VmmapPane
+from .panes import BreakpointsPane, HeapPane, ProfilerPane, VmmapPane
 from .views import DecompView
 from .widgets import buttons_width, help_marker, v4
 
@@ -150,4 +150,4 @@ class PanelsMixin:
             (ConfigPane.LABEL, self.config_pane.gui, "MainDockSpace", False),
             (CyclicPane.LABEL, self.cyclic_pane.gui, "RightBottom", True),
             (f"{fa.ICON_FA_GEAR} Preferences", self.prefs_gui, "RightBottom", False),
-        ]
+        ] + ([(ProfilerPane.LABEL, self.profiler_pane.gui, "MainDockSpace", True)] if self.profiler else [])

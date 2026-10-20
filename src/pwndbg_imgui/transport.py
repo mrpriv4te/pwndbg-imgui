@@ -8,6 +8,7 @@ import struct
 import sys
 import threading
 import time
+from collections.abc import Callable
 
 from . import APP_NAME
 from .agent import debug
@@ -21,8 +22,9 @@ class Rpc:
 
         self.sock = sock
         self.inbox: queue.Queue[dict] = queue.Queue()
-        self.callbacks: dict[int, tuple] = {}
+        self.callbacks: dict[int, tuple] = {}  # id -> (cb, err, op, time sent)
         self.next_id = 1
+        self.on_reply: Callable[[str, float], None] | None = None  # --profile: on_reply(op, seconds from request to its callback)
         self.lock = threading.Lock()
         self.connected = True
         threading.Thread(target=self._reader, name="rpc-reader", daemon=True).start()
@@ -50,7 +52,7 @@ class Rpc:
         with self.lock:
             rid = self.next_id
             self.next_id += 1
-            self.callbacks[rid] = (cb, err)
+            self.callbacks[rid] = (cb, err, op, time.perf_counter())
         data = (json.dumps({"id": rid, "op": op, "args": args}) + "\n").encode()
         try:
             self.sock.sendall(data)
@@ -58,12 +60,16 @@ class Rpc:
             self.callbacks.pop(rid, None)
 
     def resolve(self, msg: dict) -> None:
-        cb, err = self.callbacks.pop(msg["id"], (None, None))
-        if msg.get("ok"):
-            if cb:
-                cb(msg.get("res"))
-        elif err:
-            err(msg.get("err", "error"))
+        cb, err, op, t0 = self.callbacks.pop(msg["id"], (None, None, "", 0.0))
+        try:
+            if msg.get("ok"):
+                if cb:
+                    cb(msg.get("res"))
+            elif err:
+                err(msg.get("err", "error"))
+        finally:
+            if self.on_reply is not None and op:
+                self.on_reply(op, time.perf_counter() - t0)
 
 
 class Pty:

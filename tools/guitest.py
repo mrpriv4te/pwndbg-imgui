@@ -169,12 +169,15 @@ def main(argv: list[str]) -> int:
         rp.app_window_params.restore_previous_geometry = False
         rp.app_window_params.window_geometry.size = (1600, 960)
         pre = rp.callbacks.pre_new_frame
+        swapped = rp.callbacks.after_swap  # e.g. --profile's frame timing
 
         def pre_new_frame() -> None:
             pre()
             drive(self)
 
         def after_swap() -> None:
+            if swapped is not None:
+                swapped()
             while run["shots"]:
                 name, rect = run["shots"].pop(0)
                 screenshot(name, rect=rect)

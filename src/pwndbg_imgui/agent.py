@@ -16,6 +16,7 @@ import os
 import socket
 import sys
 import threading
+import time
 from typing import Any
 
 APP_NAME = "pwndbg-imgui"
@@ -133,6 +134,9 @@ class Agent:
         self.ctx = None  # pwndbg.commands.context once pwndbg is loaded
         self.pwndbg = None
         self.mask = (1 << 64) - 1
+        self.prof = None  # --profile: cProfile of gdb's thread (pwndbg included), op timings
+        self.prof_ops: dict[str, list[float]] = {}
+        self.prof_dir = ""
 
     # -- transport ----------------------------------------------------------
     def send(self, obj: dict) -> None:
@@ -166,6 +170,7 @@ class Agent:
         rid = req.get("id")
         op = req.get("op", "")
         fn = getattr(self, "op_" + op, None)
+        t0 = time.perf_counter()
         try:
             if fn is None:
                 raise ValueError(f"unknown op {op!r}")
@@ -174,6 +179,12 @@ class Agent:
         except Exception as e:  # report every failure to the GUI
             debug(f"op {op}({req.get('args')})")
             out = {"id": rid, "ok": False, "err": str(e).strip() or type(e).__name__}
+        if self.prof is not None and op != "profile":
+            secs = time.perf_counter() - t0
+            d = self.prof_ops.setdefault(op, [0, 0.0, 0.0])
+            d[0] += 1
+            d[1] += secs
+            d[2] = max(d[2], secs)
         if rid is not None:
             self.send(out)
 
@@ -374,6 +385,7 @@ class Agent:
         """Undo everything start() did, so the gdb session goes on as before."""
         if self.closed:
             return
+        self.profile_write()
         self.closed = True
         for registry, callback in self.handlers:
             try:
@@ -1029,7 +1041,43 @@ class Agent:
             debug("decompile: resolve symbol")
         return {"connected": True, "name": m.decompiler_name(), "addr": addr, "sym": sym, "lines": lines}
 
+    # -- profiling (--profile) ------------------------------------------------
+    def op_profile(self, action: str, path: str = "") -> dict:
+        """start (into directory path) / stats / reset / write. Runs on gdb's thread, so
+        cProfile sees everything gdb's Python does there: our ops, pwndbg's context."""
+        import cProfile
+
+        if action == "start" and self.prof is None:
+            self.prof_dir = path
+            self.prof = cProfile.Profile()
+            self.prof.enable()
+        elif action == "reset" and self.prof is not None:
+            self.prof.disable()
+            self.prof = cProfile.Profile()
+            self.prof.enable()
+            self.prof_ops.clear()
+        elif action == "write":
+            self.profile_write()
+        rows = [(op, int(c), t * 1000, t * 1000 / c, m * 1000) for op, (c, t, m) in self.prof_ops.items()]
+        return {"active": self.prof is not None, "ops": sorted(rows, key=lambda r: -r[2])}
+
+    def profile_write(self) -> None:
+        """Save agent.prof (gdb's thread) and agent-ops.json next to the GUI's files."""
+        if self.prof is None or not self.prof_dir:
+            return
+        try:
+            os.makedirs(self.prof_dir, exist_ok=True)
+            self.prof.disable()
+            self.prof.dump_stats(os.path.join(self.prof_dir, "agent.prof"))
+            with open(os.path.join(self.prof_dir, "agent-ops.json"), "w") as f:
+                json.dump(self.op_profile("stats"), f, indent=1)
+        except Exception:
+            debug("profile_write")
+        finally:
+            self.prof.enable()
+
     def op_quit(self) -> None:
+        self.profile_write()
         try:
             if self.gdb.selected_inferior().pid:
                 self.gdb.execute("kill", to_string=True)
